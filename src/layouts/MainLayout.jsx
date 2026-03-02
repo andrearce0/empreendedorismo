@@ -63,7 +63,7 @@ const MainLayout = () => {
             // Auto-join if URL has tableId but local storage doesn't match
             if (tableId && (!session || session.tableCode !== tableId.toUpperCase())) {
                 try {
-                    session = await joinTable(tableId.toUpperCase());
+                    session = await joinTable(tableId.toUpperCase(), restaurantSlug);
                 } catch (e) {
                     console.error("Auto-join failed via URL", e);
                 }
@@ -80,7 +80,7 @@ const MainLayout = () => {
                 setErrorMsg('Digite um código válido.');
                 return;
             }
-            const sessionData = await joinTable(tableCode.trim().toUpperCase());
+            const sessionData = await joinTable(tableCode.trim().toUpperCase(), restaurantSlug);
             setTableSession(sessionData);
             setOpenModal(false);
             setTableCode('');

@@ -13,7 +13,7 @@ export const clearTableSession = () => {
     localStorage.removeItem(TABLE_KEY);
 };
 
-export const joinTable = async (tableCode) => {
+export const joinTable = async (tableCode, restaurantSlug) => {
     try {
         const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
         const response = await fetch(`${API_URL}/api/session/join`, {
@@ -21,7 +21,7 @@ export const joinTable = async (tableCode) => {
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ tableCode })
+            body: JSON.stringify({ tableCode, restaurantSlug })
         });
 
         const data = await response.json();

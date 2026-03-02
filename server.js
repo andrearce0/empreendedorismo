@@ -627,25 +627,30 @@ app.post('/api/orders', async (req, res) => {
         );
         const orderId = orderRes.rows[0].id_pedido;
 
-        // 3. Create Order Item
-        const addonsPrice = selectedAddons.reduce((acc, curr) => acc + curr.price, 0);
-        const finalPrice = item.price + addonsPrice;
+        // 🚀 PROTEÇÃO 1: Garante que os adicionais sejam um array, mesmo se vier vazio
+        const safeAddons = selectedAddons || [];
 
+        // 🚀 PROTEÇÃO 2: Converte os valores forçadamente para número (Float) para evitar soma de strings
+        const addonsPrice = safeAddons.reduce((acc, curr) => acc + parseFloat(curr.price || 0), 0);
+        const itemPrice = parseFloat(item.price || 0);
+        const finalPrice = itemPrice + addonsPrice;
+
+        // 3. Create Order Item
         const orderItemRes = await client.query(
             'INSERT INTO pedidos_itens (id_pedido, id_item, quantidade, valor_unitario_base, final_price, observacoes) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_pedido_item',
-            [orderId, item.id, 1, item.price, finalPrice, observations]
+            [orderId, item.id, 1, itemPrice, finalPrice, observations || null]
         );
         const orderItemId = orderItemRes.rows[0].id_pedido_item;
 
         // 4. Create Order Item Addons
-        if (selectedAddons && selectedAddons.length > 0) {
-            for (const ad of selectedAddons) {
+        if (safeAddons.length > 0) {
+            for (const ad of safeAddons) {
                 // Find specific addon ID from DB
                 const adRes = await client.query('SELECT id_item_adicional FROM cardapio_itens_adicionais WHERE id_item = $1 AND nome = $2', [item.id, ad.name]);
                 if (adRes.rows.length > 0) {
                     await client.query(
                         'INSERT INTO pedidos_itens_adicionais (id_pedido_item, id_item_adicional, nome_snapshot, preco_snapshot) VALUES ($1, $2, $3, $4)',
-                        [orderItemId, adRes.rows[0].id_item_adicional, ad.name, ad.price]
+                        [orderItemId, adRes.rows[0].id_item_adicional, ad.name, parseFloat(ad.price || 0)]
                     );
                 }
             }
@@ -683,12 +688,25 @@ app.get('/api/orders/:sessionId', async (req, res) => {
             JOIN cardapio_itens ci ON pi.id_item = ci.id_item
             LEFT JOIN pedidos_itens_adicionais pia ON pi.id_pedido_item = pia.id_pedido_item
             WHERE p.id_sessao = $1
-            GROUP BY p.id_pedido, pi.id_pedido_item, ci.id_item
+            -- 🚀 CORREÇÃO: Listando todas as colunas não-agregadas para evitar Erro 500 do PostgreSQL
+            GROUP BY 
+                p.id_pedido, 
+                p.status, 
+                p.criado_em,
+                pi.id_pedido_item, 
+                pi.quantidade, 
+                pi.valor_unitario_base, 
+                pi.final_price, 
+                pi.observacoes,
+                ci.id_item, 
+                ci.nome, 
+                ci.image_url
             ORDER BY p.criado_em DESC
         `;
         const result = await pool.query(query, [req.params.sessionId]);
         res.json(result.rows);
     } catch (error) {
+        console.error('Error fetching orders:', error);
         res.status(500).json({ error: error.message });
     }
 });
