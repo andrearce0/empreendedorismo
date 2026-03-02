@@ -21,9 +21,10 @@ export const fetchMenu = async (restaurantSlug) => {
     }
 };
 
-export const getMenu = async () => {
+export const getMenu = async (slug) => {
     try {
-        const menu = await api.get('menu').json();
+        const restaurantSlug = slug || import.meta.env.VITE_RESTAURANT_SLUG || 'restaurante-demo';
+        const menu = await api.get(`menu?slug=${restaurantSlug}`).json();
         return menu;
     } catch (error) {
         console.error('Error fetching menu:', error);

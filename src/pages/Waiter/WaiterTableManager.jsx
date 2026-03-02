@@ -9,6 +9,9 @@ import ky from 'ky';
 import ItemDetailsModal from '../../components/ItemDetailsModal';
 import { acknowledgeWaiter } from '../../utils/tableStore';
 
+const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
+const RESTAURANT_SLUG = import.meta.env.VITE_RESTAURANT_SLUG || 'restaurante-demo';
+
 const WaiterTableManager = () => {
     const { tableId } = useParams();
     const navigate = useNavigate();
@@ -36,7 +39,6 @@ const WaiterTableManager = () => {
     // Função para buscar os dados da mesa (separada para podermos recarregar depois de um pedido)
     const fetchTableDetails = async () => {
         try {
-            const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
             const data = await ky.get(`${BASE_URL}/api/waiter/tables/${tableId}`).json();
             setTableDetails(data);
         } catch (err) {
@@ -55,7 +57,7 @@ const WaiterTableManager = () => {
         setMenuOpen(true);
         if (menuItems.length === 0) {
             try {
-                const data = await ky.get(`${BASE_URL}/api/menu`).json();
+                const data = await ky.get(`${BASE_URL}/api/menu?slug=${RESTAURANT_SLUG}`).json();
                 setMenuItems(data);
             } catch (err) {
                 console.error('Erro ao buscar cardápio', err);
