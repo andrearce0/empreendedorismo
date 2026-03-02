@@ -1462,14 +1462,24 @@ app.post('/api/pool/confirm', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // Evita duplicacoes checando se ja existe aquele pagamento praquele nome com mesmo valor nas ultimas horas
-        // Num cenário real seria o Webhook do Stripe checando o ID do Intent
+        // 1. Blindagem contra o "Usuário Fantasma"
+        let safeUserId = null;
+        if (userId) {
+            const userCheck = await client.query('SELECT id_usuario FROM usuarios WHERE id_usuario = $1', [userId]);
+            if (userCheck.rows.length > 0) {
+                safeUserId = userId; // Usuário existe, pode usar!
+            } else {
+                console.warn(`Aviso: Usuário ID ${userId} não encontrado no banco. Salvando como anônimo.`);
+            }
+        }
+
+        // 🚀 2. CORREÇÃO: Apenas um INSERT com as colunas corretas e status 'PAGO'
         await client.query(
             "INSERT INTO pagamentos_divisoes (id_pagamento, nome_contribuinte, valor, status, id_usuario_pagador) VALUES ($1, $2, $3, 'PAGO', $4)",
-            [poolId, contributorName, amount, userId || null]
+            [poolId, contributorName, amount, safeUserId]
         );
 
-        // Checar se completou e precisa alterar a Pool para CAPTURADO
+        // 3. Checar se completou e precisa alterar a Pool para CAPTURADO
         const poolRes = await client.query('SELECT valor_total FROM pagamentos WHERE id_pagamento = $1', [poolId]);
         const sumRes = await client.query('SELECT SUM(valor) as total_pago FROM pagamentos_divisoes WHERE id_pagamento = $1', [poolId]);
 

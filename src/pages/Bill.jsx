@@ -249,7 +249,7 @@ const Bill = () => {
     // Função real que limpa e redireciona
     const executeLeave = () => {
         clearTableSession();
-        navigate(`${basePath}/menu`);
+        navigate(`/${restaurantSlug}/menu`);
     };
 
     const isFullyPaid = pool?.isPaid || false;
