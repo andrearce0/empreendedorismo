@@ -8,6 +8,19 @@ const api = ky.create({
     retry: 0
 });
 
+export const fetchMenu = async (restaurantSlug) => {
+    try {
+        const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
+
+        // 🚀 Envie o slug na URL da requisição
+        const response = await ky.get(`${BASE_URL}/api/menu?slug=${restaurantSlug}`).json();
+        return response;
+    } catch (error) {
+        console.error('Erro ao buscar o cardápio:', error);
+        return [];
+    }
+};
+
 export const getMenu = async () => {
     try {
         const menu = await api.get('menu').json();

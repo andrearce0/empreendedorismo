@@ -353,6 +353,12 @@ app.get('/api/restaurants/nearby', async (req, res) => {
 // GET /api/menu - Fetch full menu with relations
 app.get('/api/menu', async (req, res) => {
     const { slug } = req.query;
+
+    // 🚀 1. BARREIRA DE SEGURANÇA: Se não mandar o restaurante, barra a requisição!
+    if (!slug) {
+        return res.status(400).json({ error: 'O slug do restaurante é obrigatório para carregar o cardápio.' });
+    }
+
     try {
         const query = `
             SELECT 
@@ -366,10 +372,11 @@ app.get('/api/menu', async (req, res) => {
             LEFT JOIN alergenos a ON cia.id_alergeno = a.id_alergeno
             LEFT JOIN cardapio_itens_adicionais ad ON i.id_item = ad.id_item
             JOIN restaurantes r ON i.id_restaurante = r.id_restaurante
-            WHERE i.ativo = true ${slug ? 'AND r.slug = $1' : ''}
+            WHERE i.ativo = true AND r.slug = $1 -- 🚀 2. Filtro estrito: Apenas deste restaurante!
             GROUP BY i.id_item
         `;
-        const result = await pool.query(query, slug ? [slug] : []);
+        // 🚀 3. O array de variáveis agora sempre tem o slug
+        const result = await pool.query(query, [slug]);
 
         // Map snake_case to frontend camelCase
         const menu = result.rows.map(row => ({
@@ -453,24 +460,36 @@ app.delete('/api/menu/:id', async (req, res) => {
 
 // POST /api/session/join
 app.post('/api/session/join', async (req, res) => {
-    const { tableCode } = req.body;
+    const { tableCode, restaurantSlug } = req.body;
     // user ID 1 as placeholder for anonymous clients in this demo, or we could pass user ID if logged in.
     const userId = req.body.userId || 1;
 
-    if (!tableCode) {
-        return res.status(400).json({ error: 'Código da mesa é obrigatório' });
+    // 🚀 1. Agora validamos se o Front-end mandou as duas informações
+    if (!tableCode || !restaurantSlug) {
+        return res.status(400).json({ error: 'Código da mesa e identificação do restaurante são obrigatórios' });
     }
 
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // Find table by code (case-insensitive)
-        const tableRes = await client.query('SELECT id_mesa FROM mesas WHERE UPPER(identificador_mesa) = UPPER($1) AND ativa = true', [tableCode]);
+        // 🚀 2. JOIN: Busca a mesa APENAS se ela pertencer ao restaurante com este slug
+        const tableRes = await client.query(`
+            SELECT m.id_mesa, r.id_restaurante 
+            FROM mesas m
+            JOIN restaurantes r ON m.id_restaurante = r.id_restaurante
+            WHERE UPPER(m.identificador_mesa) = UPPER($1) 
+              AND r.slug = $2 
+              AND m.ativa = true
+        `, [tableCode, restaurantSlug]);
+
         if (tableRes.rows.length === 0) {
-            return res.status(404).json({ error: 'Mesa não encontrada ou inativa' });
+            return res.status(404).json({ error: 'Mesa não encontrada neste restaurante ou inativa' });
         }
+
         const mesaId = tableRes.rows[0].id_mesa;
+        // 🚀 3. Pegamos o ID real do restaurante do banco de dados
+        const restauranteId = tableRes.rows[0].id_restaurante;
 
         // Check if there's an active session for this table
         let sessionRes = await client.query("SELECT id_sessao FROM sessoes WHERE id_mesa = $1 AND status = 'ABERTA' LIMIT 1", [mesaId]);
@@ -478,9 +497,10 @@ app.post('/api/session/join', async (req, res) => {
         let sessionId;
         if (sessionRes.rows.length === 0) {
             // Create a new session
+            // 🚀 4. Substituímos o [1, mesaId...] fixo pelo [restauranteId, mesaId...]
             const newSession = await client.query(
                 "INSERT INTO sessoes (id_restaurante, id_mesa, id_usuario_criador, status) VALUES ($1, $2, $3, 'ABERTA') RETURNING id_sessao",
-                [1, mesaId, userId] // Assuming restaurant 1
+                [restauranteId, mesaId, userId]
             );
             sessionId = newSession.rows[0].id_sessao;
         } else {
@@ -1377,7 +1397,7 @@ app.post('/api/pool/checkout', async (req, res) => {
             mode: 'payment',
             // IMPORTANT: Holds the funds instead of automatic capture
             payment_intent_data: {
-                capture_method: 'manual',
+                //capture_method: 'manual',
                 metadata: {
                     poolId: poolId.toString(),
                     contributorName,

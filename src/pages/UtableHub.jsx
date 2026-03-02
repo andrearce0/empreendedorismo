@@ -218,7 +218,10 @@ const UtableHub = () => {
                         {restaurants.map(rest => (
                             <Card
                                 key={rest.id_restaurante}
-                                onClick={() => navigate(`/${rest.slug}/menu`)}
+                                onClick={() => {
+                                    const rota = rest.slug ? rest.slug : `restaurante-${rest.id_restaurante}`;
+                                    navigate(`/${rota}/menu`);
+                                }}
                                 sx={{
                                     p: 2, borderRadius: 3,
                                     boxShadow: '0 2px 10px rgba(0,0,0,0.05)',

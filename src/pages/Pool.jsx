@@ -68,6 +68,10 @@ const Pool = () => {
         setCheckoutLoading(true);
         try {
             const user = getCurrentUser();
+
+            const basePath = window.location.pathname.split('/pool')[0];
+            localStorage.setItem('lastTablePath', basePath)
+
             const { url } = await startPoolCheckout({
                 poolId,
                 amount: finalAmount,

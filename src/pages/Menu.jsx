@@ -1,18 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { Search, SlidersHorizontal, ArrowLeft, ArrowRight, Eye, Camera, Star, Clock, ChefHat, Flame, Leaf } from 'lucide-react';
-import { Typography, Stack, Box, Snackbar, Alert, Chip } from '@mui/material';
+import { Typography, Stack, Box, Snackbar, Alert, Chip, CircularProgress } from '@mui/material';
 import CategoryBar from '../components/CategoryBar';
 import MenuItem from '../components/MenuItem';
 import ItemDetailsModal from '../components/ItemDetailsModal';
 import { addToOrder } from '../utils/orderStore';
-import { getMenu } from '../utils/menuStore';
+import { fetchMenu } from '../utils/menuStore'; // 🚀 Importe apenas a função corrigida
 import { getTableSession } from '../utils/tableStore';
+import { useParams } from 'react-router-dom';
 
 const Menu = () => {
     const [activeCategory, setActiveCategory] = useState('all');
     const [selectedAllergens, setSelectedAllergens] = useState([]);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [menuItems, setMenuItems] = useState([]);
+    const [loading, setLoading] = useState(true); // 🚀 Adicionamos um state de loading para melhorar a experiência
 
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
@@ -20,13 +22,34 @@ const Menu = () => {
 
     const allergensList = ['Glúten', 'Lactose', 'Amendoim', 'Ovos', 'Peixes', 'Soja'];
 
+    const { restaurantSlug } = useParams(); // Puxa o nome do restaurante da URL
+
+    // 🚀 APENAS UM USEEFFECT: Limpo, rápido e focado no restaurante correto.
     useEffect(() => {
-        const fetchMenu = async () => {
-            const data = await getMenu();
-            setMenuItems(data);
+        const loadMenu = async () => {
+            setLoading(true);
+            try {
+                // Passa o slug do restaurante para buscar apenas os itens dele
+                const menuData = await fetchMenu(restaurantSlug);
+
+                // Verifica se a API não retornou um erro (ex: array vazio ou objeto de erro)
+                if (Array.isArray(menuData)) {
+                    setMenuItems(menuData);
+                } else {
+                    setMenuItems([]);
+                }
+            } catch (error) {
+                console.error("Erro ao carregar o cardápio:", error);
+                setMenuItems([]);
+            } finally {
+                setLoading(false);
+            }
         };
-        fetchMenu();
-    }, []);
+
+        if (restaurantSlug) {
+            loadMenu();
+        }
+    }, [restaurantSlug]);
 
     const handleOpenModal = (item) => {
         setSelectedItemForModal(item);
@@ -44,7 +67,8 @@ const Menu = () => {
                 await addToOrder(item, addons, observations, tableSession.sessionId);
             }
             setOpenSnackbar(true);
-            setSelectedItemForModal(null); // Assuming setSelectedItem refers to setSelectedItemForModal
+            setSelectedItemForModal(null);
+            setModalOpen(false); // 🚀 Adicionado para fechar o modal corretamente
         } catch (error) {
             console.error('Error adding to order:', error);
             alert(error.message || 'Erro ao adicionar pedido. Tente novamente.');
@@ -70,7 +94,6 @@ const Menu = () => {
         // Allergen EXCLUSION filter
         if (selectedAllergens.length > 0) {
             items = items.filter(item => {
-                // If the item contains ANY of the selected allergens to exclude
                 const itemAllergens = item.allergens || [];
                 return !selectedAllergens.some(selected => itemAllergens.includes(selected));
             });
@@ -78,6 +101,26 @@ const Menu = () => {
 
         return items;
     };
+
+    // 🚀 Mostra a rodinha de carregamento enquanto o banco busca os dados
+    if (loading) {
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh' }}>
+                <CircularProgress sx={{ color: 'var(--primary)' }} />
+            </Box>
+        );
+    }
+
+    // 🚀 Mostra uma mensagem amigável se o restaurante não tiver itens
+    if (menuItems.length === 0) {
+        return (
+            <Box sx={{ textAlign: 'center', py: 10, px: 3 }}>
+                <ChefHat size={64} color="#CCC" style={{ marginBottom: '16px' }} />
+                <Typography variant="h5" sx={{ fontWeight: 900, color: 'var(--text-main)', mb: 1 }}>Cardápio Vazio</Typography>
+                <Typography variant="body1" sx={{ color: 'var(--text-muted)' }}>Este restaurante ainda não cadastrou nenhum item.</Typography>
+            </Box>
+        );
+    }
 
     return (
         <Box sx={{ pb: 8 }}>
@@ -153,7 +196,6 @@ const Menu = () => {
                     />
                 ))}
             </Box>
-
 
             <ItemDetailsModal
                 open={modalOpen}
