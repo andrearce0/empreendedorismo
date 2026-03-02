@@ -3,13 +3,18 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Box, Typography, Button, CircularProgress } from '@mui/material';
 import { CheckCircle2, Receipt } from 'lucide-react';
 import ky from 'ky';
+import { getTableSession } from '../utils/tableStore'; // 🚀 IMPORTAMOS O GERENCIADOR DA MESA
 
 const Success = () => {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
 
-    // 🚀 Lemos o "Post-it" da rota que deixamos antes de ir pro Stripe
-    const lastTablePath = localStorage.getItem('lastTablePath') || '/menu';
+    // 🚀 A GRANDE SACADA: 
+    // Tenta pegar o caminho direto da sessão ativa do cliente. 
+    // Se ele não tiver sessão (ex: amigo pagando pelo link), usa o Post-it do localStorage.
+    const session = getTableSession();
+    const activePath = session ? `/${session.restaurantSlug}/${session.tableCode}` : null;
+    const lastTablePath = activePath || localStorage.getItem('lastTablePath') || '/menu';
 
     const [countdown, setCountdown] = useState(10);
     const [paymentType, setPaymentType] = useState(null);
@@ -32,7 +37,7 @@ const Success = () => {
                 try {
                     const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
 
-                    // 🚀 Proteção contra o Bug do NaN que crasha o Banco de Dados
+                    // Proteção contra o Bug do NaN que crasha o Banco de Dados
                     const parsedUserId = parseInt(userIdParam);
                     const validUserId = isNaN(parsedUserId) ? null : parsedUserId;
 
