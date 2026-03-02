@@ -1127,8 +1127,33 @@ app.get('/api/pool/:id', async (req, res) => {
         const poolRes = await pool.query('SELECT * FROM pagamentos WHERE id_pagamento = $1', [poolId]);
         if (poolRes.rows.length === 0) return res.status(404).json({ error: 'Pool not found' });
 
-        const contributionsRes = await pool.query('SELECT nome_contribuinte, valor, status, criado_em FROM pagamentos_divisoes WHERE id_pagamento = $1 ORDER BY criado_em DESC', [poolId]);
         const poolData = poolRes.rows[0];
+
+        // 🚀 Busca os itens e o status do pedido para Auto-Cura
+        const itemsRes = await pool.query(
+            `SELECT pi2.id_pedido_item as "orderItemId", ci.nome as name, pi2.final_price as "finalPrice", pi2.quantidade as quantity, p.status as pedido_status
+             FROM pool_itens pli
+             JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
+             JOIN cardapio_itens ci ON pi2.id_item = ci.id_item
+             JOIN pedidos p ON pi2.id_pedido = p.id_pedido
+             WHERE pli.id_pagamento = $1`,
+            [poolId]
+        );
+
+        let currentStatus = poolData.status;
+
+        // 🚀 AUTO-CURA: Se a pool está pendente mas TODOS os itens foram cancelados
+        if (currentStatus === 'PENDENTE' && itemsRes.rows.length > 0) {
+            const allCancelled = itemsRes.rows.every(item => item.pedido_status === 'Cancelado');
+            if (allCancelled) {
+                await pool.query("UPDATE pagamentos SET status = 'CANCELADO' WHERE id_pagamento = $1", [poolId]);
+                currentStatus = 'CANCELADO';
+                console.log(`[Auto-Cura] Pool ${poolId} cancelada (todos os itens foram cancelados).`);
+            }
+        }
+
+        const contributionsRes = await pool.query('SELECT nome_contribuinte, valor, status, criado_em FROM pagamentos_divisoes WHERE id_pagamento = $1 ORDER BY criado_em DESC', [poolId]);
+
         const contributions = contributionsRes.rows.map(c => ({
             contributorName: c.nome_contribuinte,
             amount: parseFloat(c.valor),
@@ -1143,7 +1168,8 @@ app.get('/api/pool/:id', async (req, res) => {
             initialPaid,
             remainingAmount: Math.max(0, parseFloat(poolData.valor_total) - initialPaid),
             contributions,
-            isPaid: poolData.status === 'CAPTURADO'
+            isPaid: currentStatus === 'CAPTURADO',
+            status: currentStatus // Envia o status atualizado
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -1154,7 +1180,6 @@ app.get('/api/pool/:id', async (req, res) => {
 app.get('/api/pool/session/:sessionId', async (req, res) => {
     try {
         const sessionId = req.params.sessionId;
-        // Busca apenas a pool PENDENTE mais recente (não mistura com CAPTURADO)
         const poolRes = await pool.query(
             "SELECT * FROM pagamentos WHERE id_sessao = $1 AND status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 1",
             [sessionId]
@@ -1163,6 +1188,27 @@ app.get('/api/pool/session/:sessionId', async (req, res) => {
 
         const poolData = poolRes.rows[0];
         const poolId = poolData.id_pagamento;
+
+        // Buscar itens vinculados a esta pool E O STATUS do pedido (🚀 Adicionado p.status)
+        const itemsRes = await pool.query(
+            `SELECT pi2.id_pedido_item as "orderItemId", ci.nome as name, pi2.final_price as "finalPrice", pi2.quantidade as quantity, p.status as pedido_status
+             FROM pool_itens pli
+             JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
+             JOIN cardapio_itens ci ON pi2.id_item = ci.id_item
+             JOIN pedidos p ON pi2.id_pedido = p.id_pedido
+             WHERE pli.id_pagamento = $1`,
+            [poolId]
+        );
+
+        // 🚀 AUTO-CURA: Intercepta o fantasma antes de enviar para o Front-end
+        if (itemsRes.rows.length > 0) {
+            const allCancelled = itemsRes.rows.every(item => item.pedido_status === 'Cancelado');
+            if (allCancelled) {
+                await pool.query("UPDATE pagamentos SET status = 'CANCELADO' WHERE id_pagamento = $1", [poolId]);
+                console.log(`[Auto-Cura] Pool ${poolId} fantasma eliminada na sessão ${sessionId}.`);
+                return res.status(200).json({ pool: null }); // Finge que não viu nada e retorna vazio
+            }
+        }
 
         const contributionsRes = await pool.query(
             'SELECT nome_contribuinte, valor, status, criado_em FROM pagamentos_divisoes WHERE id_pagamento = $1 ORDER BY criado_em DESC',
@@ -1174,16 +1220,6 @@ app.get('/api/pool/session/:sessionId', async (req, res) => {
             status: c.status,
             timestamp: c.criado_em
         }));
-
-        // Buscar itens vinculados a esta pool
-        const itemsRes = await pool.query(
-            `SELECT pi2.id_pedido_item as "orderItemId", ci.nome as name, pi2.final_price as "finalPrice", pi2.quantidade as quantity
-             FROM pool_itens pli
-             JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
-             JOIN cardapio_itens ci ON pi2.id_item = ci.id_item
-             WHERE pli.id_pagamento = $1`,
-            [poolId]
-        );
 
         const paid = contributions.filter(c => ['PAGO', 'AUTORIZADO', 'CAPTURADO'].includes(c.status)).reduce((acc, c) => acc + c.amount, 0);
         res.json({
@@ -1203,7 +1239,7 @@ app.get('/api/pool/session/:sessionId', async (req, res) => {
     }
 });
 
-// GET /api/pool/session/:sessionId/all -> Lista TODAS as pools da sessão (abertas + fechadas)
+// GET /api/pool/session/:sessionId/all -> Lista TODAS as pools da sessão
 app.get('/api/pool/session/:sessionId/all', async (req, res) => {
     try {
         const sessionId = req.params.sessionId;
@@ -1214,6 +1250,26 @@ app.get('/api/pool/session/:sessionId/all', async (req, res) => {
 
         const pools = await Promise.all(poolsRes.rows.map(async (poolData) => {
             const poolId = poolData.id_pagamento;
+            let currentStatus = poolData.status;
+
+            const itemsRes = await pool.query(
+                `SELECT pi2.id_pedido_item as "orderItemId", ci.nome as name, pi2.final_price as "finalPrice", pi2.quantidade as quantity, p.status as pedido_status
+                 FROM pool_itens pli
+                 JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
+                 JOIN cardapio_itens ci ON pi2.id_item = ci.id_item
+                 JOIN pedidos p ON pi2.id_pedido = p.id_pedido
+                 WHERE pli.id_pagamento = $1`,
+                [poolId]
+            );
+
+            // 🚀 AUTO-CURA: Limpa as fantasmas do histórico também
+            if (currentStatus === 'PENDENTE' && itemsRes.rows.length > 0) {
+                const allCancelled = itemsRes.rows.every(item => item.pedido_status === 'Cancelado');
+                if (allCancelled) {
+                    await pool.query("UPDATE pagamentos SET status = 'CANCELADO' WHERE id_pagamento = $1", [poolId]);
+                    currentStatus = 'CANCELADO';
+                }
+            }
 
             const contributionsRes = await pool.query(
                 'SELECT nome_contribuinte, valor, status, criado_em FROM pagamentos_divisoes WHERE id_pagamento = $1 ORDER BY criado_em DESC',
@@ -1226,15 +1282,6 @@ app.get('/api/pool/session/:sessionId/all', async (req, res) => {
                 timestamp: c.criado_em
             }));
 
-            const itemsRes = await pool.query(
-                `SELECT pi2.id_pedido_item as "orderItemId", ci.nome as name, pi2.final_price as "finalPrice", pi2.quantidade as quantity
-                 FROM pool_itens pli
-                 JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
-                 JOIN cardapio_itens ci ON pi2.id_item = ci.id_item
-                 WHERE pli.id_pagamento = $1`,
-                [poolId]
-            );
-
             const paid = contributions.filter(c => ['PAGO', 'AUTORIZADO', 'CAPTURADO'].includes(c.status)).reduce((acc, c) => acc + c.amount, 0);
             return {
                 id: poolId,
@@ -1243,8 +1290,8 @@ app.get('/api/pool/session/:sessionId/all', async (req, res) => {
                 remainingAmount: Math.max(0, parseFloat(poolData.valor_total) - paid),
                 contributions,
                 items: itemsRes.rows,
-                isPaid: poolData.status === 'CAPTURADO',
-                status: poolData.status,
+                isPaid: currentStatus === 'CAPTURADO',
+                status: currentStatus, // Envia o status curado
                 criado_em: poolData.criado_em
             };
         }));
@@ -1281,39 +1328,31 @@ app.post('/api/pool/create', async (req, res) => {
 
         // Verificar se já existe pool PENDENTE para esta sessão
         const existingPoolRes = await client.query(
-            "SELECT id_pagamento, valor_total FROM pagamentos WHERE id_sessao = $1 AND status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 1",
+            "SELECT id_pagamento FROM pagamentos WHERE id_sessao = $1 AND status = 'PENDENTE' ORDER BY criado_em DESC LIMIT 1",
             [sessionId]
         );
 
-        let poolId, finalTotalAmount;
+        let poolId;
+        // 🚀 A GRANDE MUDANÇA: Nós confiamos no totalAmount enviado pelo Front-end,
+        // pois ele já inclui os 3% do app e a gorjeta do garçom!
+        const finalTotalAmount = parseFloat(totalAmount) || 0;
 
         if (existingPoolRes.rows.length > 0) {
-            // Retornar pool existente sem criar nova
             poolId = existingPoolRes.rows[0].id_pagamento;
-            finalTotalAmount = parseFloat(existingPoolRes.rows[0].valor_total);
-            console.log(`[Pool] Retornando pool existente ID ${poolId} para sessão ${sessionId}`);
+            // Atualiza a pool existente com o novo valor total (caso o cliente mude a gorjeta ou itens)
+            await client.query('UPDATE pagamentos SET valor_total = $1 WHERE id_pagamento = $2', [finalTotalAmount, poolId]);
+            console.log(`[Pool] Atualizando pool existente ID ${poolId} para novo total R$ ${finalTotalAmount}`);
         } else {
-            // Calcular total a partir dos itens se orderItemIds for fornecido
-            let computedTotal = totalAmount;
-            if (orderItemIds && orderItemIds.length > 0) {
-                const itemsRes = await client.query(
-                    'SELECT COALESCE(SUM(final_price * quantidade), 0) as total FROM pedidos_itens WHERE id_pedido_item = ANY($1)',
-                    [orderItemIds]
-                );
-                computedTotal = parseFloat(itemsRes.rows[0].total) || totalAmount;
-            }
-            finalTotalAmount = computedTotal;
-
             // Criar nova pool
             const newPoolRes = await client.query(
                 "INSERT INTO pagamentos (id_sessao, valor_total, status, metodo) VALUES ($1, $2, 'PENDENTE', 'STRIPE') RETURNING id_pagamento",
                 [sessionId, finalTotalAmount]
             );
             poolId = newPoolRes.rows[0].id_pagamento;
-            console.log(`[Pool] Nova pool ID ${poolId} criada para sessão ${sessionId}`);
+            console.log(`[Pool] Nova pool ID ${poolId} criada com total R$ ${finalTotalAmount}`);
         }
 
-        // Vincular itens à pool (ignorar conflitos de UNIQUE — item já vinculado fica na pool que estava)
+        // Vincular itens à pool (ignorar conflitos de UNIQUE)
         if (orderItemIds && orderItemIds.length > 0) {
             for (const itemId of orderItemIds) {
                 await client.query(
@@ -1321,17 +1360,9 @@ app.post('/api/pool/create', async (req, res) => {
                     [poolId, itemId]
                 );
             }
-            // Recalcular valor_total da pool com base nos itens agora vinculados
-            const totalRes = await client.query(
-                `SELECT COALESCE(SUM(pi2.final_price * pi2.quantidade), 0) as total
-                 FROM pool_itens pli
-                 JOIN pedidos_itens pi2 ON pli.id_pedido_item = pi2.id_pedido_item
-                 WHERE pli.id_pagamento = $1`,
-                [poolId]
-            );
-            finalTotalAmount = parseFloat(totalRes.rows[0].total) || finalTotalAmount;
-            await client.query('UPDATE pagamentos SET valor_total = $1 WHERE id_pagamento = $2', [finalTotalAmount, poolId]);
         }
+
+        // 🚀 O bloco que recalculava o valor ignorando a taxa/gorjeta foi removido!
 
         await client.query('COMMIT');
         res.json({ pool: { id: poolId, totalAmount: finalTotalAmount, remainingAmount: finalTotalAmount } });
