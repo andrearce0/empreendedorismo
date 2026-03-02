@@ -23,7 +23,11 @@ import {
     AccordionDetails,
     Tooltip,
     Checkbox,
-    FormControlLabel
+    FormControlLabel,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
 } from '@mui/material';
 import { CreditCard, Users2, Copy, Share2, QrCode, LogOut, ChevronDown, Trash2, CheckCircle, Clock, Receipt } from 'lucide-react';
 import { getOrders, createPool, getPoolBySession, getAllPools, removePoolItem, startPoolCheckout } from '../utils/orderStore';
@@ -47,6 +51,7 @@ const Bill = () => {
     const [snackMsg, setSnackMsg] = useState('');
     const [selectedItemIds, setSelectedItemIds] = useState([]); // IDs dos itens selecionados para a próxima pool/pagamento
     const [isFirstLoad, setIsFirstLoad] = useState(true);
+    const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
     // IDs dos itens que já estão em pools CAPTURADO (pagas) — excluídos da conta
     const paidItemIds = allPools
@@ -232,8 +237,19 @@ const Bill = () => {
     };
 
     const handleLeaveTable = () => {
+        //clearTableSession();
+        //navigate(`/${restaurantSlug || 'demo'}/menu`);
+        if (activeOrders.length > 0 && !isFullyPaid) {
+            setConfirmLeaveOpen(true); // Levanta a barreira!
+        } else {
+            executeLeave(); // Caminho livre
+        }
+    };
+
+    // Função real que limpa e redireciona
+    const executeLeave = () => {
         clearTableSession();
-        navigate(`/${restaurantSlug || 'demo'}/menu`);
+        navigate(`${basePath}/menu`);
     };
 
     const isFullyPaid = pool?.isPaid || false;
@@ -324,6 +340,8 @@ const Bill = () => {
                                         }}
                                     />
                                     <ListItemText
+                                        secondaryTypographyProps={{ component: 'div' }}
+
                                         primary={
                                             <Typography sx={{ fontWeight: 800, color: 'var(--text-main)', fontSize: '1rem' }}>
                                                 {item.quantity ?? item.quantidade ?? 1}x {item.name}
@@ -662,6 +680,53 @@ const Bill = () => {
             >
                 <Alert severity="success" sx={{ width: '100%', borderRadius: '16px', fontWeight: 800, boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }}>{snackMsg}</Alert>
             </Snackbar>
+
+            {/* Modal de Confirmação de Saída (Fricção Psicológica) */}
+            <Dialog
+                open={confirmLeaveOpen}
+                onClose={() => setConfirmLeaveOpen(false)}
+                PaperProps={{ sx: { borderRadius: '24px', p: 1 } }}
+            >
+                <DialogTitle sx={{ fontWeight: 900, color: '#FF5252', textAlign: 'center', pb: 1 }}>
+                    Sair da Mesa?
+                </DialogTitle>
+                <DialogContent sx={{ textAlign: 'center' }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+                        <Box sx={{ p: 2, bgcolor: '#FFF0F0', borderRadius: '50%' }}>
+                            <LogOut size={32} color="#FF5252" />
+                        </Box>
+                    </Box>
+                    <Typography variant="body1" sx={{ fontWeight: 800, mb: 1 }}>
+                        Ainda existem itens não pagos nesta mesa.
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        Ao sair, você perderá o acesso a esta conta. Certifique-se de que <b>alguém na mesa fará o pagamento</b> do valor restante.
+                    </Typography>
+                </DialogContent>
+                <DialogActions sx={{ flexDirection: 'column', px: 3, pb: 3, gap: 1 }}>
+                    <Button
+                        fullWidth
+                        variant="contained"
+                        onClick={() => setConfirmLeaveOpen(false)}
+                        sx={{ bgcolor: 'var(--primary)', fontWeight: 800, borderRadius: '12px', py: 1.5, '&:hover': { bgcolor: 'var(--primary-hover)' } }}
+                    >
+                        Ficar na Mesa
+                    </Button>
+                    <Button
+                        fullWidth
+                        variant="text"
+                        color="error"
+                        onClick={() => {
+                            setConfirmLeaveOpen(false);
+                            executeLeave();
+                        }}
+                        sx={{ fontWeight: 700, textTransform: 'none' }}
+                    >
+                        Estou ciente, quero sair
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
         </Box>
     );
 };

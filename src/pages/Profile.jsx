@@ -41,8 +41,14 @@ const Profile = () => {
 
     useEffect(() => {
         const currentUser = getCurrentUser();
+
         if (!currentUser) {
-            navigate('/auth/login');
+            // 🚀 PROTEÇÃO 1: Em vez de redirecionar para um login que pode não existir na hora,
+            // criamos um "Usuário Convidado" (Guest) para não quebrar a tela.
+            const guestUser = { id: 'guest', name: 'Visitante', email: 'Sem email cadastrado', phone: '' };
+            setUser(guestUser);
+            setFormData({ name: 'Visitante', email: '', phone: '' });
+            setLoadingHistory(false);
         } else {
             setUser(currentUser);
             setFormData({
@@ -54,9 +60,17 @@ const Profile = () => {
             // Fetch real history
             const fetchHistory = async () => {
                 setLoadingHistory(true);
-                const data = await getOrderHistory(currentUser.id);
-                setHistory(data);
-                setLoadingHistory(false);
+                try {
+                    const data = await getOrderHistory(currentUser.id);
+                    // 🚀 PROTEÇÃO 2: Garante que o histórico seja SEMPRE uma lista (Array),
+                    // evitando o crash do .map() se a API der erro.
+                    setHistory(Array.isArray(data) ? data : []);
+                } catch (err) {
+                    console.error('Erro ao buscar histórico:', err);
+                    setHistory([]);
+                } finally {
+                    setLoadingHistory(false);
+                }
             };
             fetchHistory();
         }
@@ -74,7 +88,14 @@ const Profile = () => {
         setIsEditing(false);
     };
 
-    if (!user) return null;
+    // 🚀 PROTEÇÃO 3: Em vez de "return null" (tela branca), mostramos uma rodinha de loading elegante.
+    if (!user) {
+        return (
+            <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+                <CircularProgress sx={{ color: 'var(--primary)' }} />
+            </Box>
+        );
+    }
 
     const faqs = [
         { q: 'Como acompanho meu pedido?', a: 'Você pode ver o status em tempo real na aba "Orders" no menu inferior.' },
@@ -97,7 +118,8 @@ const Profile = () => {
                 <Stack spacing={3}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                         <Avatar sx={{ width: 64, height: 64, bgcolor: '#FF8C00', fontSize: '1.5rem', fontWeight: 800 }}>
-                            {user.name?.charAt(0)}
+                            {/* 🚀 PROTEÇÃO 4: Fallback caso o nome esteja vazio para não quebrar o Avatar */}
+                            {(user.name || 'V').charAt(0).toUpperCase()}
                         </Avatar>
                         <Box sx={{ flexGrow: 1 }}>
                             {isEditing ? (
@@ -111,7 +133,7 @@ const Profile = () => {
                             ) : (
                                 <Typography variant="h6" sx={{ fontWeight: 800 }}>{user.name}</Typography>
                             )}
-                            <Typography variant="body2" color="text.secondary">Cliente Premium</Typography>
+                            <Typography variant="body2" color="text.secondary">Cliente</Typography>
                         </Box>
                         <IconButton onClick={() => isEditing ? handleSave() : setIsEditing(true)}>
                             {isEditing ? <CheckCircle2 size={24} color="#2e7d32" /> : <Edit2 size={20} />}
@@ -158,12 +180,13 @@ const Profile = () => {
             <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid #F0F0F0', mb: 4, overflow: 'hidden' }}>
                 {loadingHistory ? (
                     <Box sx={{ p: 4, textAlign: 'center' }}>
-                        <CircularProgress size={24} />
+                        <CircularProgress size={24} sx={{ color: 'var(--primary)' }} />
                     </Box>
                 ) : (
                     <List disablePadding>
-                        {history.map((session, idx) => (
-                            <React.Fragment key={session.id}>
+                        {/* 🚀 PROTEÇÃO 5: Validação do Array antes de tentar renderizar a lista */}
+                        {Array.isArray(history) && history.map((session, idx) => (
+                            <React.Fragment key={session.id || idx}>
                                 <ListItem
                                     button
                                     onClick={() => navigate(`/profile/session/${session.id}`)}
@@ -171,7 +194,7 @@ const Profile = () => {
                                 >
                                     <ListItemText
                                         primary={<Typography component="span" sx={{ fontWeight: 700 }}>Mesa {session.table}</Typography>}
-                                        secondary={new Date(session.date).toLocaleDateString('pt-BR')}
+                                        secondary={session.date ? new Date(session.date).toLocaleDateString('pt-BR') : 'Data Indisponível'}
                                     />
                                     <Stack alignItems="flex-end" spacing={0.5}>
                                         <Typography sx={{ fontWeight: 800 }}>R$ {parseFloat(session.user_paid || 0).toFixed(2)}</Typography>

@@ -55,10 +55,17 @@ const MainLayout = () => {
     const [errorMsg, setErrorMsg] = React.useState('');
     const [callingWaiter, setCallingWaiter] = React.useState(false);
     const [callSuccess, setCallSuccess] = React.useState(false);
+    const [conflictSession, setConflictSession] = React.useState(null);
 
     React.useEffect(() => {
         const checkSession = async () => {
             let session = getTableSession();
+
+            if (session && session.restaurantSlug && session.restaurantSlug !== restaurantSlug) {
+                setConflictSession(session); // Salva para mostrar no aviso
+                setTableSession(null); // Esconde a mesa errada do layout atual
+                return; // Para a execução aqui!
+            }
 
             // Auto-join if URL has tableId but local storage doesn't match
             if (tableId && (!session || session.tableCode !== tableId.toUpperCase())) {
@@ -187,7 +194,8 @@ const MainLayout = () => {
                             </Box>
                             <IconButton
                                 size="small"
-                                onClick={handleLeaveTable}
+                                //onClick={handleLeaveTable}
+                                onClick={() => navigate(`/${restaurantSlug}/${tableSession.tableCode}/bill`)}
                                 sx={{ color: '#FF5252', bgcolor: '#FFF0F0', '&:hover': { bgcolor: '#FFDADA' } }}
                             >
                                 <LogOut size={18} />
@@ -372,6 +380,44 @@ const MainLayout = () => {
                     }
                 `}
             </style>
+
+            {/* Modal de Conflito de Restaurante */}
+            <Dialog
+                open={!!conflictSession}
+                disableEscapeKeyDown
+                PaperProps={{ sx: { borderRadius: '24px', p: 2, textAlign: 'center' } }}
+            >
+                <DialogTitle sx={{ fontWeight: 900, color: '#FF5252' }}>
+                    Mesa Ativa em Outro Local!
+                </DialogTitle>
+                <DialogContent>
+                    <Typography variant="body1" sx={{ mb: 2 }}>
+                        Notamos que você ainda tem uma sessão aberta na mesa <b>{conflictSession?.tableCode}</b> do restaurante <b>{conflictSession?.restaurantSlug?.toUpperCase()}</b>.
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        O que você deseja fazer?
+                    </Typography>
+                </DialogContent>
+                <DialogActions sx={{ flexDirection: 'column', gap: 1, px: 3, pb: 2 }}>
+                    <Button
+                        variant="contained"
+                        fullWidth
+                        onClick={() => {
+                            // Volta o cara pro restaurante onde ele tem conta
+                            //navigate(`/${conflictSession.restaurantSlug}/bill`);
+                            navigate(`/${conflictSession.restaurantSlug}/${conflictSession.tableCode}/bill`);
+                            setConflictSession(null);
+                        }}
+                        sx={{ bgcolor: 'var(--primary)', fontWeight: 800, borderRadius: '12px', py: 1.5 }}
+                    >
+                        Voltar para minha Conta
+                    </Button>
+                    <Typography variant="caption" sx={{ color: 'var(--text-muted)', mt: 1, px: 2, lineHeight: 1.4 }}>
+                        Para acessar um novo restaurante, você precisa primeiro encerrar a sua mesa atual na aba "Minha Conta".
+                    </Typography>
+                </DialogActions>
+            </Dialog>
+
         </Box>
 
     );

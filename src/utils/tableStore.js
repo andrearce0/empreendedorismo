@@ -34,6 +34,7 @@ export const joinTable = async (tableCode, restaurantSlug) => {
             sessionId: data.sessionId,
             tableId: data.tableId,
             tableCode: data.tableCode,
+            restaurantSlug: restaurantSlug,
             joinedAt: new Date().toISOString()
         });
 

@@ -138,9 +138,14 @@ function App() {
                         <Route path=":tableId/bill" element={<Bill />} />
                         <Route path=":tableId/pool/:poolId" element={<Pool />} />
 
+                        <Route path=":tableId/profile" element={<Profile />} />
+                        <Route path=":tableId/profile/session/:sessionId" element={<SessionDetail />} />
+
                         <Route path="profile" element={<Profile />} />
                         <Route path="profile/session/:sessionId" element={<SessionDetail />} />
                     </Route>
+
+
 
                     {/* Global Routes */}
                     <Route path="/success" element={<Success />} />
