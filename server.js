@@ -252,7 +252,7 @@ app.post('/api/auth/login', async (req, res) => {
     try {
         // Find user
         const userRes = await pool.query(
-            `SELECT u.*, p.nome as role 
+            `SELECT u.*, p.nome as role, up.id_restaurante 
              FROM usuarios u 
              LEFT JOIN usuarios_papeis up ON u.id_usuario = up.id_usuario
              LEFT JOIN papeis p ON up.id_papel = p.id_papel
@@ -281,8 +281,9 @@ app.post('/api/auth/login', async (req, res) => {
 
         // Generate JWT
         const role = user.role || 'CLIENTE';
+        const restaurantId = user.id_restaurante;
         const token = jwt.sign(
-            { id: user.id_usuario, email: user.email, role },
+            { id: user.id_usuario, email: user.email, role, restaurantId },
             process.env.JWT_SECRET || 'fallback_secret',
             { expiresIn: '7d' }
         );
@@ -293,7 +294,8 @@ app.post('/api/auth/login', async (req, res) => {
                 id: user.id_usuario,
                 name: user.nome_completo,
                 email: user.email,
-                role
+                role,
+                restaurantId
             }
         });
     } catch (error) {
@@ -356,7 +358,6 @@ app.get('/api/restaurants/nearby', async (req, res) => {
 app.get('/api/menu', async (req, res) => {
     const { slug } = req.query;
 
-    // 🚀 1. BARREIRA DE SEGURANÇA: Se não mandar o restaurante, barra a requisição!
     if (!slug) {
         return res.status(400).json({ error: 'O slug do restaurante é obrigatório para carregar o cardápio.' });
     }
@@ -365,29 +366,32 @@ app.get('/api/menu', async (req, res) => {
         const query = `
             SELECT 
                 i.*,
+                cat.nome as category_name,
+                cat.emoji as category_emoji,
                 COALESCE(json_agg(DISTINCT ing.nome) FILTER (WHERE ing.nome IS NOT NULL), '[]') as ingredients,
                 COALESCE(json_agg(DISTINCT a.nome) FILTER (WHERE a.nome IS NOT NULL), '[]') as allergens,
                 COALESCE(json_agg(DISTINCT jsonb_build_object('name', ad.nome, 'price', ad.preco)) FILTER (WHERE ad.nome IS NOT NULL), '[]') as addons
             FROM cardapio_itens i
+            LEFT JOIN cardapio_categorias cat ON i.id_categoria = cat.id_categoria
             LEFT JOIN cardapio_itens_ingredientes ing ON i.id_item = ing.id_item
             LEFT JOIN cardapio_itens_alergenos cia ON i.id_item = cia.id_item
             LEFT JOIN alergenos a ON cia.id_alergeno = a.id_alergeno
             LEFT JOIN cardapio_itens_adicionais ad ON i.id_item = ad.id_item
             JOIN restaurantes r ON i.id_restaurante = r.id_restaurante
-            WHERE i.ativo = true AND r.slug = $1 -- 🚀 2. Filtro estrito: Apenas deste restaurante!
-            GROUP BY i.id_item
+            WHERE i.ativo = true AND r.slug = $1
+            GROUP BY i.id_item, cat.id_categoria
         `;
-        // 🚀 3. O array de variáveis agora sempre tem o slug
         const result = await pool.query(query, [slug]);
 
-        // Map snake_case to frontend camelCase
         const menu = result.rows.map(row => ({
             id: row.id_item,
             name: row.nome,
             description: row.descricao,
             price: parseFloat(row.preco),
             image: row.image_url,
-            category: row.categoria,
+            categoryId: row.id_categoria,
+            category: row.category_name || row.categoria, // Fallback to old string if new is empty
+            categoryEmoji: row.category_emoji,
             ingredients: row.ingredients,
             allergens: row.allergens,
             addons: row.addons.map(a => ({ name: a.name, price: parseFloat(a.price) }))
@@ -401,15 +405,21 @@ app.get('/api/menu', async (req, res) => {
 });
 
 // POST /api/menu - Add item
-app.post('/api/menu', async (req, res) => {
-    const { name, description, price, image, category, ingredients, addons, allergens } = req.body;
+app.post('/api/menu', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const { name, description, price, image, categoryId, ingredients, addons, allergens } = req.body;
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Usuário não está vinculado a um restaurante.' });
+    }
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
         const itemRes = await client.query(
-            'INSERT INTO cardapio_itens (id_restaurante, nome, descricao, image_url, preco, categoria) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id_item',
-            [1, name, description, image, price, category]
+            'INSERT INTO cardapio_itens (id_restaurante, nome, descricao, image_url, preco, id_categoria, categoria) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id_item',
+            [restaurantId, name, description, image, price, categoryId, ''] // Leaving old category column empty
         );
         const itemId = itemRes.rows[0].id_item;
 
@@ -449,18 +459,24 @@ app.post('/api/menu', async (req, res) => {
 });
 
 // PUT /api/menu/:id - Update item
-app.put('/api/menu/:id', async (req, res) => {
+app.put('/api/menu/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
     const { id } = req.params;
-    const { name, description, price, image, category, ingredients, addons, allergens } = req.body;
+    const { name, description, price, image, categoryId, ingredients, addons, allergens } = req.body;
+    const restaurantId = req.user.restaurantId;
+
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
 
-        // Update main item fields
-        await client.query(
-            'UPDATE cardapio_itens SET nome = $1, descricao = $2, preco = $3, image_url = $4, categoria = $5 WHERE id_item = $6',
-            [name, description, price, image, category, id]
+        // Update main item fields (ensure it belongs to this restaurant)
+        const updateRes = await client.query(
+            'UPDATE cardapio_itens SET nome = $1, descricao = $2, preco = $3, image_url = $4, id_categoria = $5 WHERE id_item = $6 AND id_restaurante = $7',
+            [name, description, price, image, categoryId, id, restaurantId]
         );
+
+        if (updateRes.rowCount === 0) {
+            throw new Error('Item não encontrado ou acesso negado.');
+        }
 
         // Recreate ingredients
         await client.query('DELETE FROM cardapio_itens_ingredientes WHERE id_item = $1', [id]);
@@ -501,9 +517,95 @@ app.put('/api/menu/:id', async (req, res) => {
 });
 
 // DELETE /api/menu/:id
-app.delete('/api/menu/:id', async (req, res) => {
+app.delete('/api/menu/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
     try {
-        await pool.query('UPDATE cardapio_itens SET ativo = false WHERE id_item = $1', [req.params.id]);
+        const restaurantId = req.user.restaurantId;
+        await pool.query('UPDATE cardapio_itens SET ativo = false WHERE id_item = $1 AND id_restaurante = $2', [req.params.id, restaurantId]);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// --- CATEGORIES CONTEXT ---
+
+// GET /api/categories - Fetch categories for a restaurant (Public)
+app.get('/api/categories', async (req, res) => {
+    const { slug } = req.query;
+    try {
+        const query = `
+            SELECT c.* 
+            FROM cardapio_categorias c
+            JOIN restaurantes r ON c.id_restaurante = r.id_restaurante
+            WHERE r.slug = $1 AND c.ativa = true
+            ORDER BY c.ordem ASC, c.nome ASC
+        `;
+        const result = await pool.query(query, [slug]);
+        res.json(result.rows.map(row => ({
+            id: row.id_categoria,
+            name: row.nome,
+            emoji: row.emoji,
+            order: row.ordem
+        })));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// GET /api/admin/categories - Fetch categories for the logged-in restaurant
+app.get('/api/admin/categories', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const restaurantId = req.user.restaurantId;
+    try {
+        const result = await pool.query(
+            'SELECT * FROM cardapio_categorias WHERE id_restaurante = $1 AND ativa = true ORDER BY ordem ASC, nome ASC',
+            [restaurantId]
+        );
+        res.json(result.rows.map(row => ({
+            id: row.id_categoria,
+            name: row.nome,
+            emoji: row.emoji,
+            order: row.ordem
+        })));
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// POST /api/categories - Create category
+app.post('/api/categories', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const { name, emoji, order } = req.body;
+    const restaurantId = req.user.restaurantId;
+    try {
+        const result = await pool.query(
+            'INSERT INTO cardapio_categorias (id_restaurante, nome, emoji, ordem) VALUES ($1, $2, $3, $4) RETURNING id_categoria',
+            [restaurantId, name, emoji || '🍽️', order || 0]
+        );
+        res.status(201).json({ id: result.rows[0].id_categoria });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// PUT /api/categories/:id - Update category
+app.put('/api/categories/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const { name, emoji, order, active } = req.body;
+    const restaurantId = req.user.restaurantId;
+    try {
+        const result = await pool.query(
+            'UPDATE cardapio_categorias SET nome = $1, emoji = $2, ordem = $3, ativa = $4 WHERE id_categoria = $5 AND id_restaurante = $6',
+            [name, emoji, order, active !== undefined ? active : true, req.params.id, restaurantId]
+        );
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// DELETE /api/categories/:id - Deactivate category
+app.delete('/api/categories/:id', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const restaurantId = req.user.restaurantId;
+    try {
+        await pool.query('UPDATE cardapio_categorias SET ativa = false WHERE id_categoria = $1 AND id_restaurante = $2', [req.params.id, restaurantId]);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });

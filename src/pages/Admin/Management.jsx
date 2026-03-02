@@ -58,7 +58,7 @@ import {
     Pie,
     Cell
 } from 'recharts';
-import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem } from '../../utils/menuStore';
+import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, fetchAdminCategories, addCategory, updateCategory, deleteCategory } from '../../utils/menuStore';
 import { getOrders } from '../../utils/orderStore';
 import { getOrderHistory } from '../../utils/userStore';
 
@@ -75,21 +75,29 @@ const Management = () => {
     // CRUD State
     const [openDialog, setOpenDialog] = useState(false);
     const [editingItem, setEditingItem] = useState(null);
+    const [categories, setCategories] = useState([]);
     const [formData, setFormData] = useState({
         name: '',
         description: '',
         price: '',
-        category: '',
+        categoryId: '',
         image: '',
         allergens: [],
         ingredients: '', // Will handle as comma-separated string in form
         addons: []
     });
+
+    // Category management state
+    const [categoryFormData, setCategoryFormData] = useState({ name: '', emoji: '', order: 0 });
+    const [editingCategory, setEditingCategory] = useState(null);
+    const [openCategoryDialog, setOpenCategoryDialog] = useState(false);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [snackbarMsg, setSnackbarMsg] = useState('');
 
     useEffect(() => {
         const fetchBaseData = async () => {
+            const cats = await fetchAdminCategories();
+            setCategories(cats);
             const menu = await getMenu();
             setMenuItems(menu);
             const liveOrders = await getOrders();
@@ -174,6 +182,7 @@ const Management = () => {
             setEditingItem(item);
             setFormData({
                 ...item,
+                categoryId: item.categoryId || '',
                 allergens: item.allergens || [],
                 ingredients: (item.ingredients || []).join(', '),
                 addons: item.addons || []
@@ -184,7 +193,7 @@ const Management = () => {
                 name: '',
                 description: '',
                 price: '',
-                category: 'Burgers',
+                categoryId: categories.length > 0 ? categories[0].id : '',
                 image: '',
                 allergens: [],
                 ingredients: '',
@@ -195,7 +204,7 @@ const Management = () => {
     };
 
     const handleSave = async () => {
-        if (!formData.name || !formData.price || !formData.category) {
+        if (!formData.name || !formData.price || !formData.categoryId) {
             alert('Por favor, preencha nome, preço e categoria.');
             return;
         }
@@ -316,6 +325,7 @@ const Management = () => {
                 <Tabs value={tab} onChange={(e, v) => setTab(v)} textColor="primary" indicatorColor="primary">
                     <Tab label="Overview" icon={<BarChartIcon size={18} />} iconPosition="start" />
                     <Tab label="Cardápio (CRUD)" icon={<Plus size={18} />} iconPosition="start" />
+                    <Tab label="Categorias" icon={<ShoppingBag size={18} />} iconPosition="start" />
                     <Tab label="Histórico" icon={<PieChartIcon size={18} />} iconPosition="start" />
                     <Tab label="Configurações" icon={<SettingsIcon size={18} />} iconPosition="start" />
                 </Tabs>
@@ -419,6 +429,63 @@ const Management = () => {
             )}
 
             {tab === 2 && (
+                <Box>
+                    <Stack direction="row" justifyContent="flex-end" sx={{ mb: 2 }}>
+                        <Button
+                            variant="contained"
+                            startIcon={<Plus />}
+                            onClick={() => {
+                                setEditingCategory(null);
+                                setCategoryFormData({ name: '', emoji: '🍽️', order: categories.length });
+                                setOpenCategoryDialog(true);
+                            }}
+                        >
+                            Nova Categoria
+                        </Button>
+                    </Stack>
+                    <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #F0F0F0', borderRadius: 4 }}>
+                        <Table>
+                            <TableHead sx={{ bgcolor: '#F8F9FA' }}>
+                                <TableRow>
+                                    <TableCell sx={{ fontWeight: 700 }}>Ordem</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Emoji</TableCell>
+                                    <TableCell sx={{ fontWeight: 700 }}>Nome</TableCell>
+                                    <TableCell align="right" sx={{ fontWeight: 700 }}>Ações</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {categories.map((cat) => (
+                                    <TableRow key={cat.id}>
+                                        <TableCell>{cat.order}</TableCell>
+                                        <TableCell sx={{ fontSize: '1.5rem' }}>{cat.emoji}</TableCell>
+                                        <TableCell sx={{ fontWeight: 700 }}>{cat.name}</TableCell>
+                                        <TableCell align="right">
+                                            <IconButton onClick={() => {
+                                                setEditingCategory(cat);
+                                                setCategoryFormData({ name: cat.name, emoji: cat.emoji, order: cat.order });
+                                                setOpenCategoryDialog(true);
+                                            }} size="small" sx={{ mr: 1, color: '#FF8C00' }}>
+                                                <Edit size={18} />
+                                            </IconButton>
+                                            <IconButton onClick={async () => {
+                                                if (window.confirm('Cuidado: Ocultar esta categoria também afetará os itens vinculados a ela. Continuar?')) {
+                                                    await deleteCategory(cat.id);
+                                                    const freshCats = await fetchAdminCategories();
+                                                    setCategories(freshCats);
+                                                }
+                                            }} size="small" color="error">
+                                                <Trash2 size={18} />
+                                            </IconButton>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                </Box>
+            )}
+
+            {tab === 3 && (
                 <TableContainer component={Paper} elevation={0} sx={{ border: '1px solid #F0F0F0', borderRadius: 4 }}>
                     <Table>
                         <TableHead sx={{ bgcolor: '#F8F9FA' }}>
@@ -449,7 +516,7 @@ const Management = () => {
                 </TableContainer>
             )}
 
-            {tab === 3 && (
+            {tab === 4 && (
                 <Grid container spacing={3}>
                     <Grid size={{ xs: 12, md: 6 }}>
                         <Card sx={{ p: 4, borderRadius: 4, border: '1px solid #F0F0F0' }}>
@@ -548,13 +615,14 @@ const Management = () => {
                                     select
                                     label="Categoria"
                                     fullWidth
-                                    value={formData.category}
-                                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                                    value={formData.categoryId}
+                                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                                 >
-                                    <MuiMenuItem value="Burgers">Burgers</MuiMenuItem>
-                                    <MuiMenuItem value="Drinks">Drinks (Bebidas)</MuiMenuItem>
-                                    <MuiMenuItem value="Sides">Sides (Acompanhamentos)</MuiMenuItem>
-                                    <MuiMenuItem value="Desserts">Desserts (Sobremesas)</MuiMenuItem>
+                                    {categories.map((cat) => (
+                                        <MuiMenuItem key={cat.id} value={cat.id}>
+                                            {cat.emoji} {cat.name}
+                                        </MuiMenuItem>
+                                    ))}
                                 </TextField>
                             </Grid>
                         </Grid>
@@ -659,6 +727,53 @@ const Management = () => {
                     <Button onClick={() => setOpenDialog(false)} color="inherit">Cancelar</Button>
                     <Button variant="contained" onClick={handleSave} sx={{ bgcolor: '#FF8C00', '&:hover': { bgcolor: '#E67E00' } }}>
                         {editingItem ? 'Salvar Alterações' : 'Criar Item'}
+                    </Button>
+                </DialogActions>
+            </Dialog>
+
+            {/* Category Editor Dialog */}
+            <Dialog open={openCategoryDialog} onClose={() => setOpenCategoryDialog(false)} maxWidth="xs" fullWidth>
+                <DialogTitle sx={{ fontWeight: 800 }}>{editingCategory ? 'Editar Categoria' : 'Nova Categoria'}</DialogTitle>
+                <DialogContent>
+                    <Stack spacing={3} sx={{ mt: 1 }}>
+                        <TextField
+                            label="Nome da Categoria"
+                            fullWidth
+                            value={categoryFormData.name}
+                            onChange={(e) => setCategoryFormData({ ...categoryFormData, name: e.target.value })}
+                        />
+                        <TextField
+                            label="Emoji"
+                            fullWidth
+                            value={categoryFormData.emoji}
+                            onChange={(e) => setCategoryFormData({ ...categoryFormData, emoji: e.target.value })}
+                            placeholder="Ex: 🍔"
+                        />
+                        <TextField
+                            label="Ordem (Ex: 1, 2, 3)"
+                            type="number"
+                            fullWidth
+                            value={categoryFormData.order}
+                            onChange={(e) => setCategoryFormData({ ...categoryFormData, order: parseInt(e.target.value) })}
+                        />
+                    </Stack>
+                </DialogContent>
+                <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setOpenCategoryDialog(false)} color="inherit">Cancelar</Button>
+                    <Button variant="contained" onClick={async () => {
+                        if (!categoryFormData.name) return alert('Nome é obrigatório');
+                        if (editingCategory) {
+                            await updateCategory(editingCategory.id, categoryFormData);
+                        } else {
+                            await addCategory(categoryFormData);
+                        }
+                        const freshCats = await fetchAdminCategories();
+                        setCategories(freshCats);
+                        setOpenCategoryDialog(false);
+                        setSnackbarMsg('Categoria salva!');
+                        setOpenSnackbar(true);
+                    }} sx={{ bgcolor: '#FF8C00', '&:hover': { bgcolor: '#E67E00' } }}>
+                        Salvar
                     </Button>
                 </DialogActions>
             </Dialog>

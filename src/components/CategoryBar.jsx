@@ -1,15 +1,13 @@
 import React from 'react';
 import { Box, Stack, Typography } from '@mui/material';
 
-const categories = [
-    { id: 'all', name: 'Todos', emoji: '🍽️' },
-    { id: 'Burgers', name: 'Burgers', emoji: '🍔' },
-    { id: 'Drinks', name: 'Bebidas', emoji: '🥤' },
-    { id: 'Sides', name: 'Acompanhamentos', emoji: '🍟' },
-    { id: 'Desserts', name: 'Sobremesas', emoji: '🍰' },
-];
+const CategoryBar = ({ activeCategory, onCategoryChange, categories = [] }) => {
+    // Add "All" category at the beginning
+    const allCategories = [
+        { id: 'all', name: 'Todos', emoji: '🍽️' },
+        ...categories
+    ];
 
-const CategoryBar = ({ activeCategory, onCategoryChange }) => {
     return (
         <Box
             className="no-scrollbar"
@@ -24,7 +22,7 @@ const CategoryBar = ({ activeCategory, onCategoryChange }) => {
             }}
         >
             <Stack direction="row" spacing={1.5}>
-                {categories.map((cat) => {
+                {allCategories.map((cat) => {
                     const isActive = activeCategory === cat.id;
                     return (
                         <Box

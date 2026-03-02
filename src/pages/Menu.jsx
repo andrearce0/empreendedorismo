@@ -5,7 +5,7 @@ import CategoryBar from '../components/CategoryBar';
 import MenuItem from '../components/MenuItem';
 import ItemDetailsModal from '../components/ItemDetailsModal';
 import { addToOrder } from '../utils/orderStore';
-import { fetchMenu } from '../utils/menuStore'; // 🚀 Importe apenas a função corrigida
+import { fetchMenu, fetchCategories } from '../utils/menuStore';
 import { getTableSession } from '../utils/tableStore';
 import { useParams } from 'react-router-dom';
 
@@ -14,7 +14,8 @@ const Menu = () => {
     const [selectedAllergens, setSelectedAllergens] = useState([]);
     const [openSnackbar, setOpenSnackbar] = useState(false);
     const [menuItems, setMenuItems] = useState([]);
-    const [loading, setLoading] = useState(true); // 🚀 Adicionamos um state de loading para melhorar a experiência
+    const [categories, setCategories] = useState([]);
+    const [loading, setLoading] = useState(true);
 
     // Modal State
     const [modalOpen, setModalOpen] = useState(false);
@@ -26,11 +27,14 @@ const Menu = () => {
 
     // 🚀 APENAS UM USEEFFECT: Limpo, rápido e focado no restaurante correto.
     useEffect(() => {
-        const loadMenu = async () => {
+        const loadMenuAndCategories = async () => {
             setLoading(true);
             try {
-                // Passa o slug do restaurante para buscar apenas os itens dele
-                const menuData = await fetchMenu(restaurantSlug);
+                // Parallel fetch for speed
+                const [menuData, categoryData] = await Promise.all([
+                    fetchMenu(restaurantSlug),
+                    fetchCategories(restaurantSlug)
+                ]);
 
                 // Verifica se a API não retornou um erro (ex: array vazio ou objeto de erro)
                 if (Array.isArray(menuData)) {
@@ -38,16 +42,19 @@ const Menu = () => {
                 } else {
                     setMenuItems([]);
                 }
+
+                if (Array.isArray(categoryData)) {
+                    setCategories(categoryData);
+                }
             } catch (error) {
-                console.error("Erro ao carregar o cardápio:", error);
-                setMenuItems([]);
+                console.error("Erro ao carregar os dados:", error);
             } finally {
                 setLoading(false);
             }
         };
 
         if (restaurantSlug) {
-            loadMenu();
+            loadMenuAndCategories();
         }
     }, [restaurantSlug]);
 
@@ -88,7 +95,7 @@ const Menu = () => {
 
         // Category filter
         if (activeCategory !== 'all') {
-            items = items.filter(i => i.category === activeCategory);
+            items = items.filter(i => i.categoryId === activeCategory);
         }
 
         // Allergen EXCLUSION filter
@@ -136,6 +143,7 @@ const Menu = () => {
             <CategoryBar
                 activeCategory={activeCategory}
                 onCategoryChange={setActiveCategory}
+                categories={categories}
             />
 
             <Box sx={{ mb: 4 }}>

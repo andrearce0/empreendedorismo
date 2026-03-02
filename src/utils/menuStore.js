@@ -58,3 +58,68 @@ export const deleteMenuItem = async (id) => {
         console.error('Error deleting menu item:', error);
     }
 };
+
+// --- CATEGORIES ---
+
+export const fetchCategories = async (slug) => {
+    try {
+        const restaurantSlug = slug || import.meta.env.VITE_RESTAURANT_SLUG || 'vite-gourmet';
+        const response = await ky.get(`${BASE_URL}/api/categories?slug=${restaurantSlug}`).json();
+        return response;
+    } catch (error) {
+        console.error('Erro ao buscar categorias:', error);
+        return [];
+    }
+};
+
+export const fetchAdminCategories = async () => {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await ky.get(`${BASE_URL}/api/admin/categories`, {
+            headers: { Authorization: `Bearer ${token}` }
+        }).json();
+        return response;
+    } catch (error) {
+        console.error('Erro ao buscar categorias administrativas:', error);
+        return [];
+    }
+};
+
+export const addCategory = async (category) => {
+    try {
+        const token = localStorage.getItem('token');
+        const response = await api.post('categories', {
+            json: category,
+            headers: { Authorization: `Bearer ${token}` }
+        }).json();
+        return response;
+    } catch (error) {
+        console.error('Error adding category:', error);
+        throw error;
+    }
+};
+
+export const updateCategory = async (id, category) => {
+    try {
+        const token = localStorage.getItem('token');
+        await api.put(`categories/${id}`, {
+            json: category,
+            headers: { Authorization: `Bearer ${token}` }
+        });
+    } catch (error) {
+        console.error('Error updating category:', error);
+        throw error;
+    }
+};
+
+export const deleteCategory = async (id) => {
+    try {
+        const token = localStorage.getItem('token');
+        await api.delete(`categories/${id}`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+    } catch (error) {
+        console.error('Error deleting category:', error);
+        throw error;
+    }
+};
