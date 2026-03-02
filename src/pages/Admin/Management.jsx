@@ -39,6 +39,7 @@ import {
     Edit,
     Trash2,
     ArrowLeft,
+    Plus,
     PieChart as PieChartIcon,
     BarChart as BarChartIcon,
     Settings as SettingsIcon,

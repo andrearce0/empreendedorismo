@@ -261,6 +261,7 @@ app.post('/api/auth/login', async (req, res) => {
         );
 
         if (userRes.rows.length === 0) {
+            console.log(`[Login Attempt] Failed: User not found for email: ${email}`);
             return res.status(401).json({ error: 'Credenciais inválidas' });
         }
 
@@ -269,6 +270,7 @@ app.post('/api/auth/login', async (req, res) => {
         // Check password
         const validPassword = await bcrypt.compare(password, user.senha_hash);
         if (!validPassword) {
+            console.log(`[Login Attempt] Failed: Invalid password for email: ${email}`);
             return res.status(401).json({ error: 'Credenciais inválidas' });
         }
 
