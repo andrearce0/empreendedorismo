@@ -23,8 +23,8 @@ export const fetchMenu = async (restaurantSlug) => {
 
 export const getMenu = async (slug) => {
     try {
-        const restaurantSlug = slug || import.meta.env.VITE_RESTAURANT_SLUG || 'restaurante-demo';
-        const menu = await api.get(`menu?slug=${restaurantSlug}`).json();
+        const restaurantSlug = slug || import.meta.env.VITE_RESTAURANT_SLUG || 'vite-gourmet';
+        const menu = await ky.get(`${BASE_URL}/api/menu?slug=${restaurantSlug}`, { timeout: 30000 }).json();
         return menu;
     } catch (error) {
         console.error('Error fetching menu:', error);
@@ -44,12 +44,10 @@ export const addMenuItem = async (item) => {
 
 export const updateMenuItem = async (item) => {
     try {
-        // For simplicity in this demo, update uses POST/id or similar if implemented, 
-        // but current server.js POST creates. Let's stick to the ones we have.
-        // If we need a real update, we'd add it to server.js.
-        await api.post('menu', { json: item });
+        await api.put(`menu/${item.id}`, { json: item });
     } catch (error) {
         console.error('Error updating menu item:', error);
+        throw error;
     }
 };
 

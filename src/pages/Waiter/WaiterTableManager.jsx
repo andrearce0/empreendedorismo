@@ -10,7 +10,7 @@ import ItemDetailsModal from '../../components/ItemDetailsModal';
 import { acknowledgeWaiter } from '../../utils/tableStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
-const RESTAURANT_SLUG = import.meta.env.VITE_RESTAURANT_SLUG || 'restaurante-demo';
+const RESTAURANT_SLUG = import.meta.env.VITE_RESTAURANT_SLUG || 'vite-gourmet';
 
 const WaiterTableManager = () => {
     const { tableId } = useParams();

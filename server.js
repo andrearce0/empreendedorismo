@@ -448,6 +448,58 @@ app.post('/api/menu', async (req, res) => {
     }
 });
 
+// PUT /api/menu/:id - Update item
+app.put('/api/menu/:id', async (req, res) => {
+    const { id } = req.params;
+    const { name, description, price, image, category, ingredients, addons, allergens } = req.body;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        // Update main item fields
+        await client.query(
+            'UPDATE cardapio_itens SET nome = $1, descricao = $2, preco = $3, image_url = $4, categoria = $5 WHERE id_item = $6',
+            [name, description, price, image, category, id]
+        );
+
+        // Recreate ingredients
+        await client.query('DELETE FROM cardapio_itens_ingredientes WHERE id_item = $1', [id]);
+        if (ingredients && ingredients.length > 0) {
+            for (const ing of ingredients) {
+                await client.query('INSERT INTO cardapio_itens_ingredientes (id_item, nome) VALUES ($1, $2)', [id, ing]);
+            }
+        }
+
+        // Recreate addons
+        await client.query('DELETE FROM cardapio_itens_adicionais WHERE id_item = $1', [id]);
+        if (addons && addons.length > 0) {
+            for (const ad of addons) {
+                await client.query('INSERT INTO cardapio_itens_adicionais (id_item, nome, preco) VALUES ($1, $2, $3)', [id, ad.name, ad.price]);
+            }
+        }
+
+        // Recreate allergens
+        await client.query('DELETE FROM cardapio_itens_alergenos WHERE id_item = $1', [id]);
+        if (allergens && allergens.length > 0) {
+            for (const alName of allergens) {
+                const alRes = await client.query('SELECT id_alergeno FROM alergenos WHERE nome = $1', [alName]);
+                if (alRes.rows.length > 0) {
+                    await client.query('INSERT INTO cardapio_itens_alergenos (id_item, id_alergeno) VALUES ($1, $2)', [id, alRes.rows[0].id_alergeno]);
+                }
+            }
+        }
+
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Error updating item:', error);
+        res.status(500).json({ error: error.message });
+    } finally {
+        client.release();
+    }
+});
+
 // DELETE /api/menu/:id
 app.delete('/api/menu/:id', async (req, res) => {
     try {
