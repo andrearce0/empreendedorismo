@@ -1035,9 +1035,14 @@ app.patch('/api/orders/:id/status', authenticateToken, async (req, res) => {
 });
 
 // --- ADMIN METRICS ---
-
-app.get('/api/admin/metrics', async (req, res) => {
+app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
     const { period } = req.query; // '1d', '1w', '1m', '3m', '6m', '1y'
+    // Pegando o id do restaurante a partir do usuário autenticado
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Usuário não vinculado a um restaurante.' });
+    }
 
     let interval = "INTERVAL '1 month'";
     if (period === '1d') interval = "INTERVAL '1 day'";
@@ -1050,65 +1055,78 @@ app.get('/api/admin/metrics', async (req, res) => {
         const client = await pool.connect();
         try {
             // 1. Financeiro: Receita e Pedidos
+            // Associando pagamento -> sessao para checar o id_restaurante
             const financialRes = await client.query(`
                 SELECT 
-                    COALESCE(SUM(valor_total), 0) as revenue,
-                    COUNT(*) as total_orders
-                FROM pagamentos 
-                WHERE status = 'CAPTURADO' AND criado_em >= NOW() - ${interval}
-            `);
+                    COALESCE(SUM(p.valor_total), 0) as revenue,
+                    COUNT(p.*) as total_orders
+                FROM pagamentos p
+                JOIN sessoes s ON p.id_sessao = s.id_sessao
+                WHERE p.status = 'CAPTURADO' 
+                  AND p.criado_em >= NOW() - ${interval}
+                  AND s.id_restaurante = $1
+            `, [restaurantId]);
 
             // 2. Mesas: Totais, Vazias e Ocupadas
             const tablesRes = await client.query(`
                 SELECT 
-                    (SELECT COUNT(*) FROM mesas WHERE ativa = true) as total_tables,
-                    (SELECT COUNT(DISTINCT id_mesa) FROM sessoes WHERE status = 'ABERTA') as occupied_tables
-            `);
+                    (SELECT COUNT(*) FROM mesas WHERE ativa = true AND id_restaurante = $1) as total_tables,
+                    (SELECT COUNT(DISTINCT id_mesa) FROM sessoes WHERE status = 'ABERTA' AND id_restaurante = $1) as occupied_tables
+            `, [restaurantId]);
 
             // 3. Performance: Tempo Médio
+            // Associando pedido -> sessao para checar o id_restaurante
             const performanceRes = await client.query(`
                 SELECT 
-                    AVG(EXTRACT(EPOCH FROM (pronto_em - em_preparo_em))/60) as avg_production_time,
-                    AVG(EXTRACT(EPOCH FROM (entregue_em - pronto_em))/60) as avg_delivery_time
-                FROM pedidos
-                WHERE status = 'Entregue' 
-                AND em_preparo_em IS NOT NULL 
-                AND pronto_em IS NOT NULL 
-                AND entregue_em IS NOT NULL
-                AND criado_em >= NOW() - ${interval}
-            `);
+                    AVG(EXTRACT(EPOCH FROM (p.pronto_em - p.em_preparo_em))/60) as avg_production_time,
+                    AVG(EXTRACT(EPOCH FROM (p.entregue_em - p.pronto_em))/60) as avg_delivery_time
+                FROM pedidos p
+                JOIN sessoes s ON p.id_sessao = s.id_sessao
+                WHERE p.status = 'Entregue' 
+                  AND p.em_preparo_em IS NOT NULL 
+                  AND p.pronto_em IS NOT NULL 
+                  AND p.entregue_em IS NOT NULL
+                  AND p.criado_em >= NOW() - ${interval}
+                  AND s.id_restaurante = $1
+            `, [restaurantId]);
 
             // 4. Horários de Pico (Agrupado por hora)
             const peakHoursRes = await client.query(`
                 SELECT 
-                    EXTRACT(HOUR FROM criado_em) as hour,
-                    COUNT(*) as count
-                FROM pedidos
-                WHERE status != 'Cancelado' AND criado_em >= NOW() - ${interval}
+                    EXTRACT(HOUR FROM p.criado_em) as hour,
+                    COUNT(p.*) as count
+                FROM pedidos p
+                JOIN sessoes s ON p.id_sessao = s.id_sessao
+                WHERE p.status != 'Cancelado' 
+                  AND p.criado_em >= NOW() - ${interval}
+                  AND s.id_restaurante = $1
                 GROUP BY hour
                 ORDER BY hour
-            `);
+            `, [restaurantId]);
 
             // 5. Abandono: Mesas abertas mas fechadas sem pedidos
-            // (Sessões fechadas que não possuem nenhum pedido associado)
             const abandonmentRes = await client.query(`
                 SELECT COUNT(*) as abandoned_sessions
                 FROM sessoes s
                 WHERE s.status = 'FECHADA' 
-                AND s.criado_em >= NOW() - ${interval}
-                AND NOT EXISTS (SELECT 1 FROM pedidos p WHERE p.id_sessao = s.id_sessao)
-            `);
+                  AND s.id_restaurante = $1
+                  AND s.criado_em >= NOW() - ${interval}
+                  AND NOT EXISTS (SELECT 1 FROM pedidos p WHERE p.id_sessao = s.id_sessao)
+            `, [restaurantId]);
 
             // 6. Evolução Diária (Para gráfico de receita)
             const dailyRevenueRes = await client.query(`
                 SELECT 
-                    TO_CHAR(criado_em, 'DD/MM') as date,
-                    SUM(valor_total) as value
-                FROM pagamentos
-                WHERE status = 'CAPTURADO' AND criado_em >= NOW() - ${interval}
-                GROUP BY date, DATE_TRUNC('day', criado_em)
-                ORDER BY DATE_TRUNC('day', criado_em)
-            `);
+                    TO_CHAR(p.criado_em, 'DD/MM') as date,
+                    SUM(p.valor_total) as value
+                FROM pagamentos p
+                JOIN sessoes s ON p.id_sessao = s.id_sessao
+                WHERE p.status = 'CAPTURADO' 
+                  AND p.criado_em >= NOW() - ${interval}
+                  AND s.id_restaurante = $1
+                GROUP BY date, DATE_TRUNC('day', p.criado_em)
+                ORDER BY DATE_TRUNC('day', p.criado_em)
+            `, [restaurantId]);
 
             const metrics = {
                 revenue: parseFloat(financialRes.rows[0].revenue),
