@@ -45,7 +45,14 @@ app.get('/', (req, res) => {
 });
 
 app.use(cors({
-    origin: ['https://www.utable.shop', 'https://utable.shop', 'https://empreendedorismo-omega.vercel.app', 'http://localhost:5173', 'http://localhost:3000'],
+    origin: [
+        'https://www.utable.shop',
+        'https://utable.shop',
+        'https://empreendedorismo-omega.vercel.app',
+        'https://empreendedorismo-production.up.railway.app', // Production Railway
+        'http://localhost:5173',
+        'http://localhost:3000'
+    ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
@@ -196,7 +203,13 @@ const authenticateToken = (req, res, next) => {
     if (token == null) return res.status(401).json({ error: 'Autenticação necessária' });
 
     jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
-        if (err) return res.status(403).json({ error: 'Token inválido ou expirado' });
+        if (err) {
+            console.error(`[Auth] JWT Verification Failed: ${err.message}`);
+            return res.status(403).json({
+                error: 'Token inválido ou expirado',
+                details: err.message
+            });
+        }
         req.user = user;
         next();
     });
@@ -205,7 +218,12 @@ const authenticateToken = (req, res, next) => {
 const requireRole = (role) => {
     return (req, res, next) => {
         if (!req.user || req.user.role !== role) {
-            return res.status(403).json({ error: 'Acesso restrito' });
+            console.warn(`[Auth] Access Denied: User ${req.user ? req.user.email : 'unknown'} with role ${req.user ? req.user.role : 'none'} tried to access ADMIN route.`);
+            return res.status(403).json({
+                error: 'Acesso restrito',
+                requiredRole: role,
+                currentRole: req.user ? req.user.role : 'none'
+            });
         }
         next();
     };
