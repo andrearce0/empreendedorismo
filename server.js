@@ -23,23 +23,20 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const app = express();
 
 // Pool otimizado para Neon PostgreSQL
-// Neon usa connection pooling e suporta SSL com channel_binding
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: {
         rejectUnauthorized: false
     },
-    max: 10,                    // máximo de conexões simultâneas
-    idleTimeoutMillis: 30000,  // fecha conexões ociosas após 30s
-    connectionTimeoutMillis: 10000, // timeout para obter conexão
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
 });
 
-// Log de erros do pool para facilitar diagnóstico
 pool.on('error', (err) => {
     console.error('[Pool] Erro inesperado na conexão:', err.message);
 });
 
-// Rota de saúde para o Railway confirmar que o servidor e o banco estão bem
 app.get('/', (req, res) => {
     res.status(200).send('API do Restaurante está Online e Rodando!');
 });
@@ -49,7 +46,7 @@ app.use(cors({
         'https://www.utable.shop',
         'https://utable.shop',
         'https://empreendedorismo-omega.vercel.app',
-        'https://empreendedorismo-production.up.railway.app', // Production Railway
+        'https://empreendedorismo-production.up.railway.app',
         'http://localhost:5173',
         'http://localhost:3000'
     ],
@@ -89,13 +86,11 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
             try {
                 await client.query('BEGIN');
 
-                // Record the authorized contribution
                 await client.query(
                     'INSERT INTO pagamentos_divisoes (id_pagamento, nome_contribuinte, valor, status, stripe_payment_intent_id) VALUES ($1, $2, $3, $4, $5)',
                     [poolId, contributorName, amountPaid, 'AUTORIZADO', paymentIntentId]
                 );
 
-                // Check total authorized
                 const poolRes = await client.query('SELECT valor_total FROM pagamentos WHERE id_pagamento = $1', [poolId]);
                 const poolData = poolRes.rows[0];
 
@@ -103,7 +98,6 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
                 const totalAuth = parseFloat(authRes.rows[0].total || 0);
 
                 if (totalAuth >= parseFloat(poolData.valor_total)) {
-                    // Capture all intents
                     const intentsToCapture = await client.query("SELECT id_divisao, stripe_payment_intent_id FROM pagamentos_divisoes WHERE id_pagamento = $1 AND status = 'AUTORIZADO'", [poolId]);
                     for (const row of intentsToCapture.rows) {
                         try {
@@ -115,7 +109,6 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
                     }
                     await client.query("UPDATE pagamentos SET status = 'CAPTURADO' WHERE id_pagamento = $1", [poolId]);
 
-                    // --- NEW: Trigger Payout/Transfer to Restaurant after Full Pool Capture ---
                     const poolDetails = await client.query(`
                         SELECT p.valor_total, r.stripe_account_id, r.id_restaurante
                         FROM pagamentos p
@@ -126,7 +119,7 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
 
                     if (poolDetails.rows.length > 0 && poolDetails.rows[0].stripe_account_id) {
                         const { valor_total, stripe_account_id } = poolDetails.rows[0];
-                        const restaurantShare = parseFloat(valor_total) * 0.97; // Deducting 3% platform fee
+                        const restaurantShare = parseFloat(valor_total) * 0.97;
                         try {
                             const transfer = await stripe.transfers.create({
                                 amount: Math.round(restaurantShare * 100),
@@ -138,17 +131,12 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
                                 "UPDATE pagamentos SET stripe_transfer_id = $1, transfer_status = 'COMPLETED' WHERE id_pagamento = $2",
                                 [transfer.id, poolId]
                             );
-                            console.log(`[Stripe Webhook] Transfer ${transfer.id} created for Pool ${poolId}`);
                         } catch (transferErr) {
                             console.error(`[Stripe Webhook] Transfer failed for Pool ${poolId}:`, transferErr.message);
-                            await client.query(
-                                "UPDATE pagamentos SET transfer_status = 'FAILED' WHERE id_pagamento = $1",
-                                [poolId]
-                            );
+                            await client.query("UPDATE pagamentos SET transfer_status = 'FAILED' WHERE id_pagamento = $1", [poolId]);
                         }
                     }
                 }
-
                 await client.query('COMMIT');
             } catch (err) {
                 await client.query('ROLLBACK');
@@ -161,32 +149,22 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
 
     if (event.type === 'payment_intent.succeeded') {
         const paymentIntent = event.data.object;
-
-        // Log transaction splits
         const amount = paymentIntent.amount_received / 100;
         const appFee = paymentIntent.application_fee_amount ? (paymentIntent.application_fee_amount / 100) : 0;
         const transfer = amount - appFee;
 
-        console.log(`[Stripe Webhook] PaymentIntent Succeeded: Total: ${amount} | Fee: ${appFee} | Transfer: ${transfer}`);
-
-        // Ensure payment intent was created via pool (has metadata)
         if (paymentIntent.metadata && paymentIntent.metadata.poolId) {
             const poolId = paymentIntent.metadata.poolId;
-
             try {
                 await pool.query(
-                    `UPDATE pagamentos 
-                     SET taxa_plataforma = $1, repasse_restaurante = $2, status = 'CAPTURADO' 
-                     WHERE id_pagamento = $3`,
+                    `UPDATE pagamentos SET taxa_plataforma = $1, repasse_restaurante = $2, status = 'CAPTURADO' WHERE id_pagamento = $3`,
                     [appFee, transfer, poolId]
                 );
-                console.log(`[Stripe Webhook] DB Updated for Pool ${poolId}`);
             } catch (dbError) {
                 console.error('[Stripe Webhook] DB Error:', dbError);
             }
         }
     }
-
     res.json({ received: true });
 });
 
@@ -200,11 +178,13 @@ const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
 
-    if (token == null) return res.status(401).json({ error: 'Autenticação necessária' });
+    if (!token || token === 'null' || token === 'undefined') {
+        return res.status(401).json({ error: 'Autenticação necessária' });
+    }
 
     jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
         if (err) {
-            console.error(`[Auth] JWT Verification Failed: ${err.message}`);
+            console.error(`[Auth] JWT Verification Failed (${err.message}). Token received: ${token.substring(0, 10)}...`);
             return res.status(403).json({
                 error: 'Token inválido ou expirado',
                 details: err.message
@@ -215,14 +195,16 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-const requireRole = (role) => {
+const requireRole = (roleOrRoles) => {
+    const allowedRoles = Array.isArray(roleOrRoles) ? roleOrRoles : [roleOrRoles];
     return (req, res, next) => {
-        if (!req.user || req.user.role !== role) {
-            console.warn(`[Auth] Access Denied: User ${req.user ? req.user.email : 'unknown'} with role ${req.user ? req.user.role : 'none'} tried to access ADMIN route.`);
+        const currentRole = req.user ? req.user.role : 'none';
+        if (!req.user || !allowedRoles.includes(currentRole)) {
+            console.warn(`[Auth] Access Denied: User ${req.user ? req.user.email : 'unknown'} with role ${currentRole} tried to access restricted route.`);
             return res.status(403).json({
                 error: 'Acesso restrito',
-                requiredRole: role,
-                currentRole: req.user ? req.user.role : 'none'
+                requiredRole: allowedRoles,
+                currentRole
             });
         }
         next();
@@ -303,11 +285,19 @@ app.post('/api/auth/login', async (req, res) => {
     try {
         // Find user
         const userRes = await pool.query(
-            `SELECT u.*, p.nome as role, up.id_restaurante 
+            `SELECT 
+                u.*, 
+                p.nome as role, 
+                COALESCE(up.id_restaurante, fr.id_restaurante) as id_restaurante
              FROM usuarios u 
              LEFT JOIN usuarios_papeis up ON u.id_usuario = up.id_usuario
              LEFT JOIN papeis p ON up.id_papel = p.id_papel
-             WHERE u.email = $1`,
+             LEFT JOIN funcionarios_restaurante fr 
+                ON fr.id_usuario = u.id_usuario 
+               AND fr.ativo = true
+             WHERE u.email = $1
+             ORDER BY up.id_usuario_papel ASC NULLS LAST, fr.id_funcionario ASC NULLS LAST
+             LIMIT 1`,
             [email]
         );
 
@@ -919,11 +909,17 @@ app.get('/api/orders/:sessionId', async (req, res) => {
 });
 
 // PATCH /api/orders/:id/status
-app.patch('/api/orders/:id/status', async (req, res) => {
+app.patch('/api/orders/:id/status', authenticateToken, requireRole(['ADMIN', 'COZINHA']), async (req, res) => {
     const { status } = req.body;
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Usuário não está vinculado a um restaurante.' });
+    }
+
     try {
-        let query = 'UPDATE pedidos SET status = $1';
-        const params = [status, req.params.id];
+        let query = 'UPDATE pedidos p SET status = $1';
+        const params = [status, req.params.id, restaurantId];
 
         if (status === 'Preparando') {
             query += ', em_preparo_em = CURRENT_TIMESTAMP';
@@ -933,9 +929,17 @@ app.patch('/api/orders/:id/status', async (req, res) => {
             query += ', entregue_em = CURRENT_TIMESTAMP';
         }
 
-        query += ' WHERE id_pedido = $2';
+        query += `
+            FROM sessoes s
+            WHERE p.id_pedido = $2
+              AND p.id_sessao = s.id_sessao
+              AND s.id_restaurante = $3
+        `;
 
-        await pool.query(query, params);
+        const result = await pool.query(query, params);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Pedido não encontrado para este restaurante.' });
+        }
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -1048,7 +1052,13 @@ app.get('/api/admin/metrics', async (req, res) => {
 // --- KITCHEN GLOBAL SYNC ---
 
 // GET /api/admin/kitchen/orders — Busca TODOS os pedidos ativos de todas as sessões
-app.get('/api/admin/kitchen/orders', async (req, res) => {
+app.get('/api/admin/kitchen/orders', authenticateToken, requireRole(['ADMIN', 'COZINHA']), async (req, res) => {
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Usuário não está vinculado a um restaurante.' });
+    }
+
     try {
         const query = `
             SELECT 
@@ -1069,11 +1079,12 @@ app.get('/api/admin/kitchen/orders', async (req, res) => {
             JOIN sessoes s ON p.id_sessao = s.id_sessao
             JOIN mesas m ON s.id_mesa = m.id_mesa
             LEFT JOIN pedidos_itens_adicionais pia ON pi.id_pedido_item = pia.id_pedido_item
-            WHERE p.status IN ('Recebido', 'Preparando', 'Pronto')
+            WHERE s.id_restaurante = $1
+              AND p.status IN ('Recebido', 'Preparando', 'Pronto')
             GROUP BY p.id_pedido, pi.id_pedido_item, ci.id_item, m.id_mesa, s.id_mesa
             ORDER BY p.criado_em ASC
         `;
-        const result = await pool.query(query);
+        const result = await pool.query(query, [restaurantId]);
         res.json(result.rows);
     } catch (e) {
         console.error('Error in kitchen orders:', e);

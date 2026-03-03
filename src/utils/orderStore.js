@@ -1,4 +1,5 @@
 import ky from 'ky';
+import { getToken } from './userStore';
 
 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
 const API_URL = `${BASE_URL}/api`;
@@ -22,7 +23,10 @@ export const getOrders = async (sessionId) => {
 
 export const getKitchenOrders = async () => {
     try {
-        const orders = await api.get('admin/kitchen/orders').json();
+        const token = getToken();
+        const orders = await api.get('admin/kitchen/orders', {
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
+        }).json();
         return orders;
     } catch (error) {
         console.error('Error fetching kitchen orders:', error);
@@ -44,8 +48,10 @@ export const addToOrder = async (item, selectedAddons = [], observations = '', s
 
 export const updateOrderStatus = async (orderId, newStatus) => {
     try {
+        const token = getToken();
         await api.patch(`orders/${orderId}/status`, {
-            json: { status: newStatus }
+            json: { status: newStatus },
+            headers: token ? { Authorization: `Bearer ${token}` } : {}
         }).json();
     } catch (error) {
         console.error('Error updating order status:', error);

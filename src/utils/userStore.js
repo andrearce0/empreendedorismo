@@ -13,19 +13,22 @@ export const saveUser = (user) => {
 };
 
 export const getToken = () => {
-    return localStorage.getItem('restaurant_token_v1');
+    return localStorage.getItem('restaurant_token_v1') || localStorage.getItem('token');
 };
 
 export const saveAuthData = (user, token) => {
     localStorage.setItem(USER_KEY, JSON.stringify(user));
     if (token) {
         localStorage.setItem('restaurant_token_v1', token);
+        // Back-compat: outras telas/utils ainda leem a chave "token"
+        localStorage.setItem('token', token);
     }
 };
 
 export const logoutUser = () => {
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem('restaurant_token_v1');
+    localStorage.removeItem('token');
 };
 
 export const registerUser = async (userData) => {
