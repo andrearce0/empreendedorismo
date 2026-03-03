@@ -602,6 +602,7 @@ app.get('/api/admin/menu', authenticateToken, requireRole('ADMIN'), async (req, 
     }
 
     try {
+        // 1. Busca todos os itens do cardápio (1ª consulta)
         const menuRes = await pool.query(
             'SELECT * FROM cardapio_itens WHERE id_restaurante = $1 ORDER BY id_categoria, nome',
             [restaurantId]
@@ -609,22 +610,27 @@ app.get('/api/admin/menu', authenticateToken, requireRole('ADMIN'), async (req, 
 
         const items = menuRes.rows;
 
-        for (let item of items) {
-            const ingRes = await pool.query('SELECT nome FROM cardapio_itens_ingredientes WHERE id_item = $1', [item.id_item]);
-            item.ingredients = ingRes.rows.map(r => r.nome);
-
-            const addRes = await pool.query('SELECT nome as name, preco as price FROM cardapio_itens_adicionais WHERE id_item = $1', [item.id_item]);
-            item.addons = addRes.rows.map(r => ({ name: r.name, price: parseFloat(r.price) }));
-
-            const alRes = await pool.query(
-                `SELECT a.nome FROM cardapio_itens_alergenos cia 
-                 JOIN alergenos a ON cia.id_alergeno = a.id_alergeno 
-                 WHERE cia.id_item = $1`,
-                [item.id_item]
-            );
-            item.allergens = alRes.rows.map(r => r.nome);
+        // Se o restaurante não tiver itens, já retorna vazio e encerra aqui
+        if (items.length === 0) {
+            return res.json([]);
         }
 
+        // Extrai apenas os IDs dos itens em uma lista: [1, 2, 3, 4...]
+        const itemIds = items.map(i => i.id_item);
+
+        // 🚀 A MÁGICA: Busca TODOS os complementos em bloco (apenas 3 consultas em vez de dezenas!)
+        const ingRes = await pool.query('SELECT id_item, nome FROM cardapio_itens_ingredientes WHERE id_item = ANY($1)', [itemIds]);
+
+        const addRes = await pool.query('SELECT id_item, nome as name, preco as price FROM cardapio_itens_adicionais WHERE id_item = ANY($1)', [itemIds]);
+
+        const alRes = await pool.query(
+            `SELECT cia.id_item, a.nome FROM cardapio_itens_alergenos cia 
+             JOIN alergenos a ON cia.id_alergeno = a.id_alergeno 
+             WHERE cia.id_item = ANY($1)`,
+            [itemIds]
+        );
+
+        // Monta o quebra-cabeça na memória do Node.js (milissegundos)
         const formattedMenu = items.map(row => ({
             id: row.id_item,
             name: row.nome,
@@ -633,9 +639,9 @@ app.get('/api/admin/menu', authenticateToken, requireRole('ADMIN'), async (req, 
             image: row.image_url,
             category: row.categoria,
             categoryId: row.id_categoria,
-            ingredients: row.ingredients,
-            addons: row.addons,
-            allergens: row.allergens
+            ingredients: ingRes.rows.filter(i => i.id_item === row.id_item).map(i => i.nome),
+            addons: addRes.rows.filter(a => a.id_item === row.id_item).map(a => ({ name: a.name, price: parseFloat(a.price) })),
+            allergens: alRes.rows.filter(al => al.id_item === row.id_item).map(al => al.nome)
         }));
 
         res.json(formattedMenu);

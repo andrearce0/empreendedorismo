@@ -58,7 +58,7 @@ import {
     Pie,
     Cell
 } from 'recharts';
-import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, fetchAdminMenu, fetchAdminCategories, addCategory, updateCategory, deleteCategory } from '../../utils/menuStore';
+import { addMenuItem, updateMenuItem, deleteMenuItem, fetchAdminMenu, fetchAdminCategories, addCategory, updateCategory, deleteCategory } from '../../utils/menuStore';
 import { getOrders } from '../../utils/orderStore';
 import { getOrderHistory } from '../../utils/userStore';
 
@@ -95,28 +95,57 @@ const Management = () => {
     const [snackbarMsg, setSnackbarMsg] = useState('');
 
     useEffect(() => {
-        const fetchBaseData = async () => {
-            const cats = await fetchAdminCategories();
-            setCategories(cats);
+        let isMounted = true;
 
-            // 🚀 A MÁGICA ACONTECE AQUI: Usamos a função do Admin com Token!
-            const menu = await fetchAdminMenu();
-            setMenuItems(menu);
+        // 1. DADOS ESTÁTICOS: Carrega Categorias e Cardápio APENAS UMA VEZ
+        const fetchStaticData = async () => {
+            try {
+                const cats = await fetchAdminCategories();
+                if (isMounted && cats) setCategories(cats);
 
-            const liveOrders = await getOrders();
-            const mappedHistory = liveOrders.map(o => ({
-                id: o.id,
-                total: parseFloat(o.finalPrice || o.price),
-                status: o.status,
-                items: [o.name],
-                date: new Date(o.timestamp).toISOString().split('T')[0]
-            }));
-            setHistory(mappedHistory);
+                const menu = await fetchAdminMenu();
+                if (isMounted && menu !== null) setMenuItems(menu);
+            } catch (error) {
+                console.error("Erro ao buscar dados estáticos:", error);
+            }
         };
-        fetchBaseData();
+
+        // 2. DADOS DINÂMICOS: Carrega apenas os Pedidos
+        const fetchLiveOrders = async () => {
+            try {
+                const liveOrders = await getOrders();
+                if (isMounted && liveOrders) {
+                    const mappedHistory = liveOrders.map(o => ({
+                        id: o.id,
+                        total: parseFloat(o.finalPrice || o.price),
+                        status: o.status,
+                        items: [o.name],
+                        date: new Date(o.timestamp).toISOString().split('T')[0]
+                    }));
+                    setHistory(mappedHistory);
+                }
+            } catch (e) {
+                console.error("Erro ao atualizar pedidos silenciosamente", e);
+            }
+        };
+
+        fetchStaticData();
+        fetchLiveOrders();
+
+        // 3. MOTORZINHO: Atualiza APENAS os pedidos a cada 10 segundos!
+        const intervalId = setInterval(() => {
+            fetchLiveOrders();
+        }, 10000);
+
+        return () => {
+            isMounted = false;
+            clearInterval(intervalId);
+        };
     }, []);
 
     useEffect(() => {
+        let isMounted = true; // 🚀 TRAVA 2: Protege as métricas
+
         const fetchMetrics = async () => {
             setLoading(true);
             try {
@@ -126,11 +155,12 @@ const Management = () => {
                 const data = await ky.get(`${import.meta.env.VITE_API_URL || 'http://localhost:4242'}/api/admin/metrics?period=${period}`, {
                     headers: { Authorization: `Bearer ${token}` }
                 }).json();
-                setMetrics(data);
+
+                if (isMounted) setMetrics(data);
             } catch (e) {
                 console.error('Error fetching metrics:', e);
             } finally {
-                setLoading(false);
+                if (isMounted) setLoading(false);
             }
         };
 
@@ -142,15 +172,20 @@ const Management = () => {
                 const status = await ky.get(`${import.meta.env.VITE_API_URL || 'http://localhost:4242'}/api/admin/stripe/status`, {
                     headers: { Authorization: `Bearer ${token}` }
                 }).json();
-                setStripeStatus({ ...status, loading: false });
+
+                if (isMounted) setStripeStatus({ ...status, loading: false });
             } catch (e) {
                 console.error('Error fetching Stripe status:', e);
-                setStripeStatus({ connected: false, loading: false });
+                if (isMounted) setStripeStatus({ connected: false, loading: false });
             }
         };
 
         fetchMetrics();
         fetchStripeStatus();
+
+        return () => {
+            isMounted = false;
+        };
     }, [period]);
 
     const handleStripeConnect = async () => {
