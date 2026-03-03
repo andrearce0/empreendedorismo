@@ -77,6 +77,7 @@ CREATE TABLE restaurantes (
     latitude VARCHAR(50) NULL,
     longitude VARCHAR(50) NULL,
     slug VARCHAR(100) NULL UNIQUE,
+    stripe_account_id VARCHAR(100) NULL,
     ativo BOOLEAN NOT NULL DEFAULT true
 );
 
@@ -221,6 +222,8 @@ CREATE TABLE pagamentos (
     status VARCHAR(20) NOT NULL, -- PENDENTE, CAPTURADO, CANCELADO
     metodo VARCHAR(20) NOT NULL, -- CARTAO, DINHEIRO
     stripe_payment_id VARCHAR(100) NULL,
+    stripe_transfer_id VARCHAR(100) NULL,
+    transfer_status VARCHAR(20) NULL, -- PENDING, COMPLETED, FAILED
     criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

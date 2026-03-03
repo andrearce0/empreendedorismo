@@ -107,6 +107,39 @@ app.post('/webhook/stripe', express.raw({ type: 'application/json' }), async (re
                         }
                     }
                     await client.query("UPDATE pagamentos SET status = 'CAPTURADO' WHERE id_pagamento = $1", [poolId]);
+
+                    // --- NEW: Trigger Payout/Transfer to Restaurant after Full Pool Capture ---
+                    const poolDetails = await client.query(`
+                        SELECT p.valor_total, r.stripe_account_id, r.id_restaurante
+                        FROM pagamentos p
+                        JOIN sessoes s ON p.id_sessao = s.id_sessao
+                        JOIN restaurantes r ON s.id_restaurante = r.id_restaurante
+                        WHERE p.id_pagamento = $1
+                    `, [poolId]);
+
+                    if (poolDetails.rows.length > 0 && poolDetails.rows[0].stripe_account_id) {
+                        const { valor_total, stripe_account_id } = poolDetails.rows[0];
+                        const restaurantShare = parseFloat(valor_total) * 0.97; // Deducting 3% platform fee
+                        try {
+                            const transfer = await stripe.transfers.create({
+                                amount: Math.round(restaurantShare * 100),
+                                currency: 'brl',
+                                destination: stripe_account_id,
+                                transfer_group: `POOL_${poolId}`,
+                            });
+                            await client.query(
+                                "UPDATE pagamentos SET stripe_transfer_id = $1, transfer_status = 'COMPLETED' WHERE id_pagamento = $2",
+                                [transfer.id, poolId]
+                            );
+                            console.log(`[Stripe Webhook] Transfer ${transfer.id} created for Pool ${poolId}`);
+                        } catch (transferErr) {
+                            console.error(`[Stripe Webhook] Transfer failed for Pool ${poolId}:`, transferErr.message);
+                            await client.query(
+                                "UPDATE pagamentos SET transfer_status = 'FAILED' WHERE id_pagamento = $1",
+                                [poolId]
+                            );
+                        }
+                    }
                 }
 
                 await client.query('COMMIT');
@@ -1154,43 +1187,22 @@ app.post('/create-checkout-session', async (req, res) => {
         if (restaurantSlug) successUrl += `&slug=${restaurantSlug}`;
         if (tableId) successUrl += `&table=${tableId}`;
 
-        // Feature: Stripe Connect Split
-        let paymentIntentData = {};
-
-        // Fetch restaurant's Stripe Account ID if sessionId is provided
-        if (sessionId) {
-            const restQuery = await pool.query(`
-                SELECT r.stripe_account_id 
-                FROM restaurantes r
-                JOIN sessoes s ON s.id_restaurante = r.id_restaurante
-                WHERE s.id_sessao = $1
-            `, [sessionId]);
-
-            if (restQuery.rows.length > 0 && restQuery.rows[0].stripe_account_id) {
-                const acctId = restQuery.rows[0].stripe_account_id;
-
-                // Ensure platform gets exactly 3%
-                const feeAmount = Math.round(totalAmount * 0.03 * 100);
-
-                paymentIntentData = {
-                    application_fee_amount: feeAmount,
-                    transfer_data: {
-                        destination: acctId
-                    }
-                };
-            }
-        }
+        // --- MODIFIED: Separate Charges and Transfers model ---
+        // We no longer inject transfer_data into the checkout session.
+        // The transfer will be handled in the webhook upon successful payment.
 
         const sessionPayload = {
             line_items,
             mode: 'payment',
             success_url: successUrl,
             cancel_url: `${YOUR_DOMAIN}/bill?canceled=true`,
+            payment_intent_data: {
+                metadata: {
+                    sessionId: sessionId ? sessionId.toString() : '',
+                    restaurantSlug: restaurantSlug || ''
+                }
+            }
         };
-
-        if (Object.keys(paymentIntentData).length > 0) {
-            sessionPayload.payment_intent_data = paymentIntentData;
-        }
 
         const session = await stripe.checkout.sessions.create(sessionPayload);
 
@@ -1256,14 +1268,42 @@ app.post('/api/payment/direct/confirm', async (req, res) => {
              WHERE p.id_sessao = $1 AND p.status != 'Cancelado'`,
             [sessionId]
         );
-        for (const item of activeItemsRes.rows) {
-            await client.query(
-                'INSERT INTO pool_itens (id_pagamento, id_pedido_item) VALUES ($1, $2) ON CONFLICT (id_pedido_item) DO NOTHING',
-                [paymentId, item.id_pedido_item]
+        await client.query('COMMIT');
+
+        // --- NEW: Trigger Payout/Transfer for Direct Payment ---
+        try {
+            const restQuery = await pool.query(`
+                SELECT r.stripe_account_id 
+                FROM restaurantes r
+                JOIN sessoes s ON s.id_restaurante = r.id_restaurante
+                WHERE s.id_sessao = $1
+            `, [sessionId]);
+
+            if (restQuery.rows.length > 0 && restQuery.rows[0].stripe_account_id) {
+                const acctId = restQuery.rows[0].stripe_account_id;
+                const restaurantShare = parseFloat(amount) * 0.97;
+
+                const transfer = await stripe.transfers.create({
+                    amount: Math.round(restaurantShare * 100),
+                    currency: 'brl',
+                    destination: acctId,
+                    transfer_group: `DIRECT_${paymentId}`,
+                });
+
+                await pool.query(
+                    "UPDATE pagamentos SET stripe_transfer_id = $1, transfer_status = 'COMPLETED' WHERE id_pagamento = $2",
+                    [transfer.id, paymentId]
+                );
+                console.log(`[Direct Payment] Transfer ${transfer.id} created for Payment ${paymentId}`);
+            }
+        } catch (transferErr) {
+            console.error('[Direct Payment] Transfer failed:', transferErr.message);
+            await pool.query(
+                "UPDATE pagamentos SET transfer_status = 'FAILED' WHERE id_pagamento = $1",
+                [paymentId]
             );
         }
 
-        await client.query('COMMIT');
         res.json({ success: true });
     } catch (e) {
         await client.query('ROLLBACK');
@@ -1590,6 +1630,9 @@ app.post('/api/pool/checkout', async (req, res) => {
     try {
         const { poolId, amount, contributorName, itemName, userId, type, restaurantSlug, tableId } = req.body;
 
+        // --- MODIFIED: Separate Charges and Transfers model ---
+        // We no longer inject transfer_data into the checkout session.
+
         const sessionPayload = {
             line_items: [{
                 price_data: {
@@ -1600,9 +1643,7 @@ app.post('/api/pool/checkout', async (req, res) => {
                 quantity: 1,
             }],
             mode: 'payment',
-            // IMPORTANT: Holds the funds instead of automatic capture
             payment_intent_data: {
-                //capture_method: 'manual',
                 metadata: {
                     poolId: poolId.toString(),
                     contributorName,
@@ -1612,25 +1653,6 @@ app.post('/api/pool/checkout', async (req, res) => {
             success_url: `${YOUR_DOMAIN}/success?pool_id=${poolId}&amount=${amount}&name=${encodeURIComponent(contributorName)}${userId ? `&user_id=${userId}` : ''}${type ? `&type=${type}` : ''}${restaurantSlug ? `&slug=${restaurantSlug}` : ''}${tableId ? `&table=${tableId}` : ''}`,
             cancel_url: `${YOUR_DOMAIN}/pool/${poolId}?canceled=true`,
         };
-
-        // Inject Destination Charges (Split) if pool matches a connected restaurant
-        const restQuery = await pool.query(`
-            SELECT r.stripe_account_id 
-            FROM restaurantes r
-            JOIN sessoes s ON s.id_restaurante = r.id_restaurante
-            JOIN pagamentos p ON p.id_sessao = s.id_sessao
-            WHERE p.id_pagamento = $1
-        `, [poolId]);
-
-        if (restQuery.rows.length > 0 && restQuery.rows[0].stripe_account_id) {
-            const acctId = restQuery.rows[0].stripe_account_id;
-            const feeAmount = Math.round(amount * 0.03 * 100);
-
-            sessionPayload.payment_intent_data.application_fee_amount = feeAmount;
-            sessionPayload.payment_intent_data.transfer_data = {
-                destination: acctId
-            };
-        }
 
         const session = await stripe.checkout.sessions.create(sessionPayload);
 
