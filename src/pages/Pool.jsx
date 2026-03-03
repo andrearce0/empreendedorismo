@@ -63,14 +63,18 @@ const Pool = () => {
             const basePath = window.location.pathname.split('/pool')[0];
             localStorage.setItem('lastTablePath', basePath);
 
+            // 🔥 A CORREÇÃO AQUI TAMBÉM: Se o useParams falhar, pegamos direto da URL
+            const currentSlug = restaurantSlug || window.location.pathname.split('/')[1];
+            const currentTableId = tableId || 'mesa';
+
             const { url } = await startPoolCheckout({
                 poolId,
                 amount: finalAmount,
                 contributorName: contributorName,
                 itemName: `Vaquinha da Mesa - #${poolId}`,
                 userId: user?.id,
-                restaurantSlug,
-                tableId
+                restaurantSlug: currentSlug, // <-- Passando a variável segura
+                tableId: currentTableId      // <-- Passando a variável segura
             });
             window.location.href = url;
         } catch (err) {

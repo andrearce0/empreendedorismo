@@ -137,6 +137,10 @@ const Bill = () => {
         if (!session) return alert('Não há mesa vinculada.');
         if (selectedOrders.length === 0) return alert('Selecione os itens que deseja pagar.');
 
+        // 🔥 A CORREÇÃO: Forçamos a captura do slug lendo o primeiro pedaço da URL ou da sessão
+        const currentSlug = typeof restaurantSlug !== 'undefined' ? restaurantSlug : (session?.restaurantSlug || window.location.pathname.split('/')[1]);
+        const currentTableId = typeof tableId !== 'undefined' ? tableId : (session?.tableId || 'mesa');
+
         try {
             const orderItemIds = selectedItemIds.filter(Boolean);
             const newPool = await createPool(total, total, session.sessionId, orderItemIds);
@@ -148,8 +152,8 @@ const Bill = () => {
                 itemName: `Pagamento Mesa ${session.tableIdentifier}`,
                 userId: user?.id,
                 type: 'direct',
-                restaurantSlug,
-                tableId
+                restaurantSlug: currentSlug, // <-- Passando a variável segura
+                tableId: currentTableId      // <-- Passando a variável segura
             });
             window.location.href = url;
         } catch (err) {
