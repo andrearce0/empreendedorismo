@@ -1,4 +1,3 @@
-import React from 'react';
 import { Box, Card, Typography, Stack, Button, Container } from '@mui/material';
 import { ChefHat, Settings, ArrowLeft, Users } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
