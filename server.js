@@ -593,6 +593,58 @@ app.get('/api/categories', async (req, res) => {
     }
 });
 
+// GET /api/admin/menu -> Busca o cardápio EXCLUSIVO do restaurante do Admin logado
+app.get('/api/admin/menu', authenticateToken, requireRole('ADMIN'), async (req, res) => {
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Admin não vinculado a nenhum restaurante.' });
+    }
+
+    try {
+        const menuRes = await pool.query(
+            'SELECT * FROM cardapio_itens WHERE id_restaurante = $1 ORDER BY id_categoria, nome',
+            [restaurantId]
+        );
+
+        const items = menuRes.rows;
+
+        for (let item of items) {
+            const ingRes = await pool.query('SELECT nome FROM cardapio_itens_ingredientes WHERE id_item = $1', [item.id_item]);
+            item.ingredients = ingRes.rows.map(r => r.nome);
+
+            const addRes = await pool.query('SELECT nome as name, preco as price FROM cardapio_itens_adicionais WHERE id_item = $1', [item.id_item]);
+            item.addons = addRes.rows.map(r => ({ name: r.name, price: parseFloat(r.price) }));
+
+            const alRes = await pool.query(
+                `SELECT a.nome FROM cardapio_itens_alergenos cia 
+                 JOIN alergenos a ON cia.id_alergeno = a.id_alergeno 
+                 WHERE cia.id_item = $1`,
+                [item.id_item]
+            );
+            item.allergens = alRes.rows.map(r => r.nome);
+        }
+
+        const formattedMenu = items.map(row => ({
+            id: row.id_item,
+            name: row.nome,
+            description: row.descricao,
+            price: parseFloat(row.preco),
+            image: row.image_url,
+            category: row.categoria,
+            categoryId: row.id_categoria,
+            ingredients: row.ingredients,
+            addons: row.addons,
+            allergens: row.allergens
+        }));
+
+        res.json(formattedMenu);
+    } catch (error) {
+        console.error('Error fetching admin menu:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // GET /api/admin/categories - Fetch categories for the logged-in restaurant
 app.get('/api/admin/categories', authenticateToken, requireRole('ADMIN'), async (req, res) => {
     const restaurantId = req.user.restaurantId;

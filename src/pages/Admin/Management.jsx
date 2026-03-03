@@ -58,7 +58,7 @@ import {
     Pie,
     Cell
 } from 'recharts';
-import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, fetchAdminCategories, addCategory, updateCategory, deleteCategory } from '../../utils/menuStore';
+import { getMenu, addMenuItem, updateMenuItem, deleteMenuItem, fetchAdminMenu, fetchAdminCategories, addCategory, updateCategory, deleteCategory } from '../../utils/menuStore';
 import { getOrders } from '../../utils/orderStore';
 import { getOrderHistory } from '../../utils/userStore';
 
@@ -98,8 +98,11 @@ const Management = () => {
         const fetchBaseData = async () => {
             const cats = await fetchAdminCategories();
             setCategories(cats);
-            const menu = await getMenu();
+
+            // 🚀 A MÁGICA ACONTECE AQUI: Usamos a função do Admin com Token!
+            const menu = await fetchAdminMenu();
             setMenuItems(menu);
+
             const liveOrders = await getOrders();
             const mappedHistory = liveOrders.map(o => ({
                 id: o.id,
@@ -223,8 +226,8 @@ const Management = () => {
             setSnackbarMsg('Item adicionado ao cardápio!');
         }
 
-        const freshMenu = await getMenu();
-        setMenuItems(freshMenu);
+        const updatedMenu = await fetchAdminMenu();
+        setMenuItems(updatedMenu);
         setOpenDialog(false);
         setOpenSnackbar(true);
     };
@@ -232,8 +235,8 @@ const Management = () => {
     const handleDelete = async (id) => {
         if (window.confirm('Excluir este item?')) {
             await deleteMenuItem(id);
-            const freshMenu = await getMenu();
-            setMenuItems(freshMenu);
+            const updatedMenu = await fetchAdminMenu();
+            setMenuItems(updatedMenu);
             setSnackbarMsg('Item removido.');
             setOpenSnackbar(true);
         }

@@ -21,6 +21,21 @@ export const fetchMenu = async (restaurantSlug) => {
     }
 };
 
+export const fetchAdminMenu = async () => {
+    try {
+        const token = localStorage.getItem('token');
+        const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
+
+        const response = await ky.get(`${BASE_URL}/api/admin/menu`, {
+            headers: { Authorization: `Bearer ${token}` }
+        }).json();
+        return response;
+    } catch (error) {
+        console.error('Erro ao buscar cardápio administrativo:', error);
+        return [];
+    }
+};
+
 export const getMenu = async (slug) => {
     try {
         const restaurantSlug = slug || import.meta.env.VITE_RESTAURANT_SLUG || 'vite-gourmet';
@@ -34,7 +49,11 @@ export const getMenu = async (slug) => {
 
 export const addMenuItem = async (item) => {
     try {
-        const newItem = await api.post('menu', { json: item }).json();
+        const token = localStorage.getItem('token'); // 🚀 PEGA O CRACHÁ DO ADMIN
+        const newItem = await api.post('menu', {
+            json: item,
+            headers: { Authorization: `Bearer ${token}` } // 🚀 ENVIA PARA O BACK-END
+        }).json();
         return newItem;
     } catch (error) {
         console.error('Error adding menu item:', error);
@@ -44,7 +63,11 @@ export const addMenuItem = async (item) => {
 
 export const updateMenuItem = async (item) => {
     try {
-        await api.put(`menu/${item.id}`, { json: item });
+        const token = localStorage.getItem('token');
+        await api.put(`menu/${item.id}`, {
+            json: item,
+            headers: { Authorization: `Bearer ${token}` }
+        });
     } catch (error) {
         console.error('Error updating menu item:', error);
         throw error;
@@ -53,7 +76,10 @@ export const updateMenuItem = async (item) => {
 
 export const deleteMenuItem = async (id) => {
     try {
-        await api.delete(`menu/${id}`).json();
+        const token = localStorage.getItem('token');
+        await api.delete(`menu/${id}`, {
+            headers: { Authorization: `Bearer ${token}` }
+        }).json();
     } catch (error) {
         console.error('Error deleting menu item:', error);
     }
