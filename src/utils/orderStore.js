@@ -46,11 +46,12 @@ export const addToOrder = async (item, selectedAddons = [], observations = '', s
     }
 };
 
-export const updateOrderStatus = async (orderId, newStatus) => {
+export const updateOrderStatus = async (orderId, newStatus, sessionId = null) => {
     try {
         const token = getToken();
         await api.patch(`orders/${orderId}/status`, {
-            json: { status: newStatus },
+            // Enviamos o sessionId junto com o status
+            json: { status: newStatus, sessionId },
             headers: token ? { Authorization: `Bearer ${token}` } : {}
         }).json();
     } catch (error) {

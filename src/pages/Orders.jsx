@@ -31,7 +31,8 @@ const statusColors = {
 const Orders = () => {
     const [orders, setOrders] = useState([]);
     const [anchorEl, setAnchorEl] = useState(null);
-    const [selectedOrderId, setSelectedOrderId] = useState(null);
+    // Mudamos de selectedOrderId para o objeto selectedOrder inteiro para saber o status dele no menu
+    const [selectedOrder, setSelectedOrder] = useState(null);
     const [loading, setLoading] = useState(true);
 
     const fetchOrders = async () => {
@@ -41,7 +42,6 @@ const Orders = () => {
             return;
         }
         const data = await getOrders(session.sessionId);
-        // Ordenar por data (mais recentes primeiro)
         const sortedData = data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
         setOrders(sortedData);
         setLoading(false);
@@ -53,18 +53,23 @@ const Orders = () => {
         return () => clearInterval(interval);
     }, []);
 
-    const handleMenuOpen = (event, id) => {
+    const handleMenuOpen = (event, order) => {
         setAnchorEl(event.currentTarget);
-        setSelectedOrderId(id);
+        setSelectedOrder(order);
     };
 
     const handleMenuClose = () => {
         setAnchorEl(null);
-        setSelectedOrderId(null);
+        setSelectedOrder(null);
     };
 
     const handleStatusChange = async (newStatus) => {
-        await updateOrderStatus(selectedOrderId, newStatus);
+        if (!selectedOrder) return;
+
+        const session = getTableSession();
+
+        await updateOrderStatus(selectedOrder.id, newStatus, session?.sessionId);
+
         await fetchOrders();
         handleMenuClose();
     };
@@ -154,9 +159,13 @@ const Orders = () => {
                                     <Typography variant="subtitle1" sx={{ fontWeight: 900, color: 'var(--text-main)', lineHeight: 1.2 }}>
                                         {order.quantity ?? order.quantidade ?? 1}x {order.name}
                                     </Typography>
-                                    <IconButton size="small" onClick={(e) => handleMenuOpen(e, order.id)} sx={{ mt: -0.5, mr: -0.5 }}>
-                                        <MoreVertical size={18} color="var(--text-muted)" />
-                                    </IconButton>
+
+                                    {/* REGRA APLICADA: Os três pontinhos SÓ aparecem se o pedido acabou de ser recebido */}
+                                    {order.status === 'Recebido' && (
+                                        <IconButton size="small" onClick={(e) => handleMenuOpen(e, order)} sx={{ mt: -0.5, mr: -0.5 }}>
+                                            <MoreVertical size={18} color="var(--text-muted)" />
+                                        </IconButton>
+                                    )}
                                 </Box>
 
                                 <Typography variant="caption" sx={{ color: 'var(--text-muted)', fontWeight: 600, display: 'block', mb: 1.5 }}>
@@ -217,7 +226,7 @@ const Orders = () => {
                 ))}
             </Stack>
 
-            {/* Menu para trocar status (Simulação Admin/Waiter) */}
+            {/* Menu atualizado para apenas Cancelar */}
             <Menu
                 anchorEl={anchorEl}
                 open={Boolean(anchorEl)}
@@ -234,19 +243,21 @@ const Orders = () => {
             >
                 <Box sx={{ px: 2, py: 1.5 }}>
                     <Typography variant="caption" sx={{ fontWeight: 900, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 1 }}>
-                        Alterar Status
+                        Ações do Pedido
                     </Typography>
                 </Box>
                 <Divider />
-                {Object.keys(statusColors).map((status) => (
+
+                {/* Mostra a opção de cancelar apenas se a cozinha ainda não começou */}
+                {selectedOrder?.status === 'Recebido' && (
                     <MuiMenuItem
-                        key={status}
-                        onClick={() => handleStatusChange(status)}
-                        sx={{ py: 1.5, fontWeight: 700, fontSize: '0.9rem' }}
+                        onClick={() => handleStatusChange('Cancelado')}
+                        sx={{ py: 1.5, fontWeight: 700, fontSize: '0.9rem', color: '#D32F2F' }}
                     >
-                        {status}
+                        <XCircle size={18} style={{ marginRight: 8 }} />
+                        Cancelar Pedido
                     </MuiMenuItem>
-                ))}
+                )}
             </Menu>
         </Box>
     );

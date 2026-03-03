@@ -967,17 +967,32 @@ app.get('/api/orders/:sessionId', async (req, res) => {
 });
 
 // PATCH /api/orders/:id/status
-app.patch('/api/orders/:id/status', authenticateToken, requireRole(['ADMIN', 'COZINHA']), async (req, res) => {
-    const { status } = req.body;
+app.patch('/api/orders/:id/status', authenticateToken, async (req, res) => {
+    // 1. Agora também recebemos o sessionId
+    const { status, sessionId } = req.body;
+    const userRole = req.user.role || req.user.perfil;
     const restaurantId = req.user.restaurantId;
 
-    if (!restaurantId) {
-        return res.status(403).json({ error: 'Usuário não está vinculado a um restaurante.' });
-    }
-
     try {
+        const isStaff = ['ADMIN', 'COZINHA', 'GARCOM'].includes(userRole);
+
+        if (isStaff && !restaurantId) {
+            return res.status(403).json({ error: 'Staff não está vinculado a um restaurante.' });
+        }
+
+        if (!isStaff) {
+            if (status !== 'Cancelado') {
+                return res.status(403).json({ error: 'Acesso negado. Clientes só podem cancelar pedidos.' });
+            }
+            // Nova trava: Se for cliente, é obrigatório enviar a sessão da mesa
+            if (!sessionId) {
+                return res.status(400).json({ error: 'ID da sessão não fornecido para validação de segurança.' });
+            }
+        }
+
         let query = 'UPDATE pedidos p SET status = $1';
-        const params = [status, req.params.id, restaurantId];
+        const params = [status, req.params.id];
+        let paramIndex = 3;
 
         if (status === 'Preparando') {
             query += ', em_preparo_em = CURRENT_TIMESTAMP';
@@ -991,15 +1006,30 @@ app.patch('/api/orders/:id/status', authenticateToken, requireRole(['ADMIN', 'CO
             FROM sessoes s
             WHERE p.id_pedido = $2
               AND p.id_sessao = s.id_sessao
-              AND s.id_restaurante = $3
         `;
 
-        const result = await pool.query(query, params);
-        if (result.rowCount === 0) {
-            return res.status(404).json({ error: 'Pedido não encontrado para este restaurante.' });
+        if (isStaff) {
+            params.push(restaurantId);
+            query += ` AND s.id_restaurante = $${paramIndex}`;
+        } else {
+            params.push(sessionId);
+            // Trava dupla blindada para o cliente:
+            // 1. O pedido só pode ser cancelado se estiver "Recebido".
+            // 2. O pedido OBRIGATORIAMENTE tem que pertencer ao sessionId enviado.
+            query += ` AND p.status = 'Recebido' AND p.id_sessao = $${paramIndex}`;
         }
+
+        const result = await pool.query(query, params);
+
+        if (result.rowCount === 0) {
+            return res.status(400).json({
+                error: 'Falha ao alterar. O pedido pode não existir, não pertencer à sua mesa ou a cozinha já começou a prepará-lo.'
+            });
+        }
+
         res.json({ success: true });
     } catch (error) {
+        console.error("Erro no patch de orders:", error);
         res.status(500).json({ error: error.message });
     }
 });
