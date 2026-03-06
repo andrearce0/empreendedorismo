@@ -1905,7 +1905,11 @@ app.post('/api/pool/confirm', async (req, res) => {
 // --- WAITER PORTAL ---
 
 // GET /api/waiter/tables - Listagem geral de status para o Dashboard do Garcom
-app.get('/api/waiter/tables', async (req, res) => {
+// 🚀 1. Adicionado authenticateToken
+app.get('/api/waiter/tables', authenticateToken, async (req, res) => {
+    // 🚀 2. Pegamos o ID do restaurante de quem está logado
+    const restaurantId = req.user.restaurantId;
+
     try {
         const query = `
             SELECT m.id_mesa as mesa_id, m.identificador_mesa as identificador, m.capacidade, m.chamar_garcom,
@@ -1916,11 +1920,12 @@ app.get('/api/waiter/tables', async (req, res) => {
             LEFT JOIN sessoes s ON m.id_mesa = s.id_mesa AND s.status = 'ABERTA'
             LEFT JOIN pedidos p ON s.id_sessao = p.id_sessao
             LEFT JOIN pedidos_itens pi ON p.id_pedido = pi.id_pedido
-            WHERE m.ativa = true
+            WHERE m.ativa = true 
+              AND m.id_restaurante = $1 -- 🚀 3. Filtro de ouro! Só traz mesas deste restaurante
             GROUP BY m.id_mesa, s.id_sessao, s.status
             ORDER BY m.identificador_mesa ASC
         `;
-        const result = await pool.query(query);
+        const result = await pool.query(query, [restaurantId]);
         res.json(result.rows);
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -1928,20 +1933,28 @@ app.get('/api/waiter/tables', async (req, res) => {
 });
 
 // GET /api/waiter/tables/:tableId - Detalhes e extrato da conta daquela mesa
-app.get('/api/waiter/tables/:tableId', async (req, res) => {
+// 🚀 4. Protegemos a visualização da mesa individual também
+app.get('/api/waiter/tables/:tableId', authenticateToken, async (req, res) => {
     try {
         const { tableId } = req.params;
+        const restaurantId = req.user.restaurantId;
 
-        // Dados basiocs da mesa e da sessao aberta
+        // 🚀 5. Evita que um garçom "chute" o ID de uma mesa do concorrente na URL e consiga ver a conta
+        const basicRes = await pool.query(
+            "SELECT identificador_mesa, chamar_garcom FROM mesas WHERE id_mesa = $1 AND id_restaurante = $2",
+            [tableId, restaurantId]
+        );
+
+        if (basicRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Mesa não encontrada ou não pertence a este estabelecimento.' });
+        }
+
+        const { identificador_mesa: identificador, chamar_garcom } = basicRes.rows[0];
+
         const sessionRes = await pool.query(
             "SELECT id_sessao, status FROM sessoes WHERE id_mesa = $1 AND status = 'ABERTA' LIMIT 1",
             [tableId]
         );
-
-        const basicRes = await pool.query("SELECT identificador_mesa, chamar_garcom FROM mesas WHERE id_mesa = $1", [tableId]);
-        if (basicRes.rows.length === 0) return res.status(404).json({ error: 'Mesa not found' });
-
-        const { identificador_mesa: identificador, chamar_garcom } = basicRes.rows[0];
 
         if (sessionRes.rows.length === 0) {
             return res.json({ identificador, chamar_garcom, status: 'LIVRE', pedidos: [], total_pendente: 0 });
@@ -2097,13 +2110,22 @@ app.post('/api/table/:tableId/call-waiter', async (req, res) => {
 });
 
 // POST /api/table/:tableId/acknowledge-waiter
-app.post('/api/table/:tableId/acknowledge-waiter', async (req, res) => {
+app.post('/api/table/:tableId/acknowledge-waiter', authenticateToken, async (req, res) => {
     try {
         const { tableId } = req.params;
-        await pool.query(
-            "UPDATE mesas SET chamar_garcom = false WHERE id_mesa = $1",
-            [tableId]
+        const restaurantId = req.user.restaurantId; // Pega o ID do restaurante do garçom logado
+
+        // Atualiza apenas se a mesa existir E pertencer ao restaurante correto
+        const result = await pool.query(
+            "UPDATE mesas SET chamar_garcom = false WHERE id_mesa = $1 AND id_restaurante = $2 RETURNING *",
+            [tableId, restaurantId]
         );
+
+        // Se rowCount for 0, significa que a mesa não existe ou é de outro restaurante
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: "Mesa não encontrada ou acesso negado." });
+        }
+
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ error: e.message });

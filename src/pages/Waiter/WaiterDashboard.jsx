@@ -14,17 +14,27 @@ const WaiterDashboard = () => {
         const fetchTablesInfo = async () => {
             try {
                 const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
-                // To display tables and their current session status, we need a new backend endpoint
-                // or we can mock the UI until we create it.
-                // For now, let's call a hypothetical endpoint that we'll build next.
-                const data = await ky.get(`${BASE_URL}/api/waiter/tables`).json();
+                // 🚀 1. Pegamos o token
+                const token = localStorage.getItem('token');
+
+                // 🚀 2. Enviamos no cabeçalho
+                const data = await ky.get(`${BASE_URL}/api/waiter/tables`, {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                }).json();
+
                 setTables(data);
             } catch (err) {
                 console.error("Error fetching tables for waiter:", err);
+                if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+                    alert("Sessão expirada. Faça login novamente.");
+                }
             } finally {
                 setLoading(false);
             }
         };
+
         fetchTablesInfo();
         const intervalId = setInterval(fetchTablesInfo, 10000);
         return () => clearInterval(intervalId);
@@ -33,9 +43,17 @@ const WaiterDashboard = () => {
     const handleAcknowledge = async (e, tableId) => {
         e.stopPropagation();
         try {
+            // Se essa função acknowledgeWaiter faz chamada à API, ela também precisará do token lá dentro do arquivo dela!
             await acknowledgeWaiter(tableId);
+
             // Refresh list
-            const data = await ky.get(`${import.meta.env.VITE_API_URL || 'http://localhost:4242'}/api/waiter/tables`).json();
+            const token = localStorage.getItem('token');
+            const data = await ky.get(`${import.meta.env.VITE_API_URL || 'http://localhost:4242'}/api/waiter/tables`, {
+                headers: {
+                    Authorization: `Bearer ${token}` // 🚀 3. Token adicionado no refresh também
+                }
+            }).json();
+
             setTables(data);
         } catch (err) {
             console.error("Error acknowledging waiter call:", err);

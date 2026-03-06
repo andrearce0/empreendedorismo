@@ -59,9 +59,18 @@ export const callWaiter = async (tableId) => {
 export const acknowledgeWaiter = async (tableId) => {
     try {
         const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4242';
+
+        // 🚀 1. Pega o token do garçom/admin salvo no navegador
+        const token = localStorage.getItem('token');
+
         const response = await fetch(`${API_URL}/api/table/${tableId}/acknowledge-waiter`, {
             method: 'POST',
+            // 🚀 2. Envia o token no cabeçalho
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
         });
+
         if (!response.ok) throw new Error('Erro ao atender garçom');
         return await response.json();
     } catch (error) {

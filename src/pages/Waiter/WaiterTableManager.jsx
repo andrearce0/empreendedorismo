@@ -37,10 +37,25 @@ const WaiterTableManager = () => {
     // Função para buscar os dados da mesa (separada para podermos recarregar depois de um pedido)
     const fetchTableDetails = async () => {
         try {
-            const data = await ky.get(`${BASE_URL}/api/waiter/tables/${tableId}`).json();
+            // 🚀 1. Pega o token de autenticação salvo no navegador
+            const token = localStorage.getItem('token');
+
+            // 🚀 2. Envia o token no cabeçalho (Header) da requisição
+            const data = await ky.get(`${BASE_URL}/api/waiter/tables/${tableId}`, {
+                headers: {
+                    Authorization: `Bearer ${token}`
+                }
+            }).json();
+
             setTableDetails(data);
         } catch (err) {
             console.error("Error fetching table details:", err);
+
+            // 🚀 3. Bônus de UX: Avisa se o garçom foi deslogado (Erro 401/403)
+            if (err.response && (err.response.status === 401 || err.response.status === 403)) {
+                alert("Sessão expirada. Por favor, faça login novamente.");
+                // Opcional: window.location.href = '/login';
+            }
         } finally {
             setLoading(false);
         }
