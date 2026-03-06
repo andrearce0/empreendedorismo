@@ -1175,6 +1175,42 @@ app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
     }
 });
 
+// --- ADMIN HISTORY ---
+app.get('/api/admin/history', authenticateToken, async (req, res) => {
+    const restaurantId = req.user.restaurantId;
+
+    if (!restaurantId) {
+        return res.status(403).json({ error: 'Usuário não vinculado a um restaurante.' });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                p.id_pedido as id,
+                p.criado_em as date,
+                p.status,
+                m.identificador_mesa as table_name,
+                SUM(pi.quantidade * pi.final_price) as total,
+                STRING_AGG(ci.nome || ' (x' || pi.quantidade || ')', ', ') as items
+            FROM pedidos p
+            JOIN pedidos_itens pi ON p.id_pedido = pi.id_pedido
+            JOIN cardapio_itens ci ON pi.id_item = ci.id_item
+            JOIN sessoes s ON p.id_sessao = s.id_sessao
+            JOIN mesas m ON s.id_mesa = m.id_mesa
+            WHERE s.id_restaurante = $1
+            GROUP BY p.id_pedido, p.criado_em, p.status, m.identificador_mesa
+            ORDER BY p.criado_em DESC
+            LIMIT 100 -- Traz os últimos 100 pedidos
+        `;
+
+        const result = await pool.query(query, [restaurantId]);
+        res.json(result.rows);
+    } catch (e) {
+        console.error('Error fetching admin history:', e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // --- KITCHEN GLOBAL SYNC ---
 
 // GET /api/admin/kitchen/orders — Busca TODOS os pedidos ativos de todas as sessões

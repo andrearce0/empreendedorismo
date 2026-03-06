@@ -116,22 +116,31 @@ const Management = () => {
             }
         };
 
-        // 2. DADOS DINÂMICOS: Carrega apenas os Pedidos
+        // 2. DADOS DINÂMICOS: Carrega o Histórico de Pedidos do Admin
         const fetchLiveOrders = async () => {
             try {
-                const liveOrders = await getOrders();
-                if (isMounted && liveOrders) {
-                    const mappedHistory = liveOrders.map(o => ({
+                const token = localStorage.getItem('token');
+                if (!token) return;
+
+                const data = await ky.get(`${import.meta.env.VITE_API_URL || 'http://localhost:4242'}/api/admin/history`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                }).json();
+
+                if (isMounted && data) {
+                    const mappedHistory = data.map(o => ({
                         id: o.id,
-                        total: parseFloat(o.finalPrice || o.price),
+                        total: parseFloat(o.total || 0),
                         status: o.status,
-                        items: [o.name],
-                        date: new Date(o.timestamp).toISOString().split('T')[0]
+                        items: o.items.split(', '), // Transforma a string do SQL num array para o layout
+                        date: new Date(o.date).toLocaleDateString('pt-BR', {
+                            day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                        }),
+                        table: o.table_name
                     }));
                     setHistory(mappedHistory);
                 }
             } catch (e) {
-                console.error("Erro ao atualizar pedidos silenciosamente", e);
+                console.error("Erro ao atualizar histórico de pedidos", e);
             }
         };
 
