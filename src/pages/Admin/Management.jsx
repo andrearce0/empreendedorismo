@@ -24,15 +24,21 @@ import {
     IconButton,
     Snackbar,
     Alert,
+    LinearProgress,
     Avatar,
     Chip,
     FormControl,
     InputLabel,
     Select,
     OutlinedInput,
+    List,
+    ListItem,
+    ListItemAvatar,
+    ListItemText,
     MenuItem as MuiMenuItem
 } from '@mui/material';
 import {
+    AlertCircle,
     TrendingUp,
     DollarSign,
     ShoppingBag,
@@ -369,44 +375,254 @@ const Management = () => {
                 </Tabs>
             </Box>
 
+            {/* OVERVIEW TAB */}
             {tab === 0 && (
-                <Grid container spacing={3}>
-                    <Grid size={{ xs: 12, md: 8 }}>
-                        <Card sx={{ p: 3, borderRadius: 4, border: '1px solid #F0F0F0', minHeight: 400 }}>
-                            <Typography variant="h6" sx={{ fontWeight: 800, mb: 3 }}>Evolução de Receita (R$)</Typography>
-                            <Box sx={{ height: 300, width: '100%', minWidth: 0 }}>
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={metrics?.revenueEvolution || []} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <XAxis dataKey="date" axisLine={false} tickLine={false} />
-                                        <YAxis axisLine={false} tickLine={false} />
-                                        <Tooltip cursor={{ fill: '#F5F5F5' }} />
-                                        <Bar dataKey="value" fill="#FF8C00" radius={[4, 4, 0, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </Box>
-                        </Card>
+                <Box sx={{ animation: 'fadeIn 0.5s ease-in' }}>
+
+                    {/* Cabeçalho e Filtros */}
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, flexWrap: 'wrap', gap: 2 }}>
+                        <Box>
+                            <Typography variant="h5" sx={{ fontWeight: 900, color: '#1A1A1A' }}>Visão Geral do Negócio</Typography>
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>Acompanhe o desempenho do seu restaurante em tempo real.</Typography>
+                        </Box>
+
+                        <Stack direction="row" spacing={1} sx={{ bgcolor: '#FFF', p: 0.5, borderRadius: '16px', border: '1px solid #E0E0E0' }}>
+                            {['1d', '1w', '1m', '3m', '6m', '1y'].map((p) => (
+                                <Chip
+                                    key={p}
+                                    label={p.toUpperCase()}
+                                    onClick={() => setPeriod(p)}
+                                    clickable
+                                    sx={{
+                                        fontWeight: 800,
+                                        borderRadius: '12px',
+                                        bgcolor: period === p ? 'var(--primary)' : 'transparent',
+                                        color: period === p ? '#FFF' : 'text.secondary',
+                                        '&:hover': { bgcolor: period === p ? 'var(--primary-hover)' : '#F5F5F5' },
+                                        border: 'none'
+                                    }}
+                                />
+                            ))}
+                        </Stack>
+                    </Box>
+
+                    {/* 🚀 CARDS DE MÉTRICAS (KPIs) */}
+                    <Grid container spacing={3} mb={4}>
+                        {/* 1. Faturamento & Ticket Médio */}
+                        <Grid item xs={12} sm={6} md={4}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #C8E6C9', bgcolor: '#F1F8E9', position: 'relative', overflow: 'hidden' }}>
+                                <Box sx={{ position: 'absolute', top: -20, right: -20, opacity: 0.1 }}><DollarSign size={120} color="#2E7D32" /></Box>
+                                <Stack direction="row" spacing={1.5} alignItems="center" mb={2}>
+                                    <Avatar sx={{ bgcolor: '#FFF', color: '#2E7D32', width: 32, height: 32 }}><TrendingUp size={18} /></Avatar>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#2E7D32', textTransform: 'uppercase', letterSpacing: 1 }}>Receita Bruta</Typography>
+                                </Stack>
+                                <Typography variant="h3" sx={{ fontWeight: 900, color: '#1B5E20', mb: 0.5 }}>
+                                    R$ {totalRevenue.toFixed(2)}
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: '#388E3C', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                    Ticket Médio: <strong style={{ color: '#1B5E20' }}>R$ {(totalOrders > 0 ? (totalRevenue / totalOrders) : 0).toFixed(2)}</strong>
+                                </Typography>
+                            </Card>
+                        </Grid>
+
+                        {/* 2. Total de Pedidos */}
+                        <Grid item xs={12} sm={6} md={4}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #FFE0B2', bgcolor: '#FFF3E0', position: 'relative', overflow: 'hidden' }}>
+                                <Box sx={{ position: 'absolute', top: -20, right: -20, opacity: 0.1 }}><ShoppingBag size={120} color="#E65100" /></Box>
+                                <Stack direction="row" spacing={1.5} alignItems="center" mb={2}>
+                                    <Avatar sx={{ bgcolor: '#FFF', color: '#E65100', width: 32, height: 32 }}><ShoppingBag size={18} /></Avatar>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#E65100', textTransform: 'uppercase', letterSpacing: 1 }}>Pedidos Realizados</Typography>
+                                </Stack>
+                                <Typography variant="h3" sx={{ fontWeight: 900, color: '#E65100', mb: 0.5 }}>
+                                    {totalOrders}
+                                </Typography>
+                                <Typography variant="body2" sx={{ color: '#F57C00', fontWeight: 600 }}>No período selecionado</Typography>
+                            </Card>
+                        </Grid>
+
+                        {/* 3. Ocupação de Mesas */}
+                        <Grid item xs={12} sm={6} md={4}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #B3E5FC', bgcolor: '#E1F5FE', position: 'relative', overflow: 'hidden' }}>
+                                <Box sx={{ position: 'absolute', top: -20, right: -20, opacity: 0.1 }}><PieChartIcon size={120} color="#0277BD" /></Box>
+                                <Stack direction="row" spacing={1.5} alignItems="center" mb={2}>
+                                    <Avatar sx={{ bgcolor: '#FFF', color: '#0277BD', width: 32, height: 32 }}><PieChartIcon size={18} /></Avatar>
+                                    <Typography variant="subtitle2" sx={{ fontWeight: 800, color: '#0277BD', textTransform: 'uppercase', letterSpacing: 1 }}>Ocupação do Salão</Typography>
+                                </Stack>
+                                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, mb: 0.5 }}>
+                                    <Typography variant="h3" sx={{ fontWeight: 900, color: '#01579B' }}>
+                                        {metrics?.tables?.occupied || 0}
+                                    </Typography>
+                                    <Typography variant="h5" sx={{ fontWeight: 700, color: '#0288D1' }}>
+                                        / {metrics?.tables?.total || 0}
+                                    </Typography>
+                                </Box>
+                                <Typography variant="body2" sx={{ color: '#0288D1', fontWeight: 600 }}>Mesas ocupadas agora</Typography>
+                            </Card>
+                        </Grid>
+
+                        {/* 4. Métricas Secundárias (Tempo e Abandono) - Usando uma Grid Menor para caberem juntas */}
+                        <Grid item xs={12}>
+                            <Grid container spacing={2}>
+                                <Grid item xs={12} sm={4}>
+                                    <Card elevation={0} sx={{ p: 2.5, borderRadius: '20px', border: '1px solid #E0E0E0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Box>
+                                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 800, textTransform: 'uppercase' }}>Tempo Médio de Produção</Typography>
+                                            <Typography variant="h5" sx={{ fontWeight: 900, color: '#1A1A1A' }}>{metrics?.performance?.avgProduction || '0.0'} min</Typography>
+                                        </Box>
+                                        <Avatar sx={{ bgcolor: '#F5F5F5', color: '#757575' }}><TrendingUp size={20} /></Avatar>
+                                    </Card>
+                                </Grid>
+                                <Grid item xs={12} sm={4}>
+                                    <Card elevation={0} sx={{ p: 2.5, borderRadius: '20px', border: '1px solid #E0E0E0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Box>
+                                            <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 800, textTransform: 'uppercase' }}>Tempo Médio de Entrega</Typography>
+                                            <Typography variant="h5" sx={{ fontWeight: 900, color: '#1A1A1A' }}>{metrics?.performance?.avgDelivery || '0.0'} min</Typography>
+                                        </Box>
+                                        <Avatar sx={{ bgcolor: '#F5F5F5', color: '#757575' }}><TrendingUp size={20} /></Avatar>
+                                    </Card>
+                                </Grid>
+                                <Grid item xs={12} sm={4}>
+                                    <Card elevation={0} sx={{ p: 2.5, borderRadius: '20px', border: '1px solid #FFCDD2', bgcolor: '#FFEBEE', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Box>
+                                            <Typography variant="caption" sx={{ color: '#C62828', fontWeight: 800, textTransform: 'uppercase' }}>Abandono de Mesa</Typography>
+                                            <Typography variant="h5" sx={{ fontWeight: 900, color: '#B71C1C' }}>{metrics?.abandonment || 0} mesas</Typography>
+                                        </Box>
+                                        <Avatar sx={{ bgcolor: '#FFCDD2', color: '#C62828' }}><AlertCircle size={20} /></Avatar>
+                                    </Card>
+                                </Grid>
+                            </Grid>
+                        </Grid>
                     </Grid>
-                    <Grid size={{ xs: 12, md: 4 }}>
-                        <Card sx={{ p: 3, borderRadius: 4, border: '1px solid #F0F0F0', minHeight: 400 }}>
-                            <Typography variant="h6" sx={{ fontWeight: 800, mb: 3 }}>Horários de Pico (Pedidos)</Typography>
-                            <Box sx={{ height: 300, width: '100%', minWidth: 0, display: 'flex', justifyContent: 'center' }}>
-                                <ResponsiveContainer width="100%" height={300}>
-                                    <BarChart data={metrics?.peakHours || []} layout="vertical" margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                                        <XAxis type="number" hide />
-                                        <YAxis dataKey="hour" type="category" axisLine={false} tickLine={false} width={40} />
-                                        <Tooltip cursor={{ fill: '#F5F5F5' }} />
-                                        <Bar dataKey="count" fill="#1A1A1A" radius={[0, 4, 4, 0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
-                            </Box>
-                            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
-                                Total abandono: {metrics?.abandonment || 0} mesas
-                            </Typography>
-                        </Card>
+
+                    {/* 📊 ÁREA DE GRÁFICOS */}
+                    <Grid container spacing={3}>
+                        {/* Gráfico de Receita */}
+                        <Grid item xs={12} lg={8}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #E0E0E0', height: '100%' }}>
+                                <Typography variant="h6" sx={{ fontWeight: 900, mb: 3 }}>Evolução de Receita (R$)</Typography>
+                                <Box sx={{ width: '100%', height: 300 }}>
+                                    {metrics?.revenueEvolution && metrics.revenueEvolution.length > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={metrics.revenueEvolution}>
+                                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#EEE" />
+                                                <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 600, fill: '#999' }} />
+                                                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 600, fill: '#999' }} tickFormatter={(val) => `R$ ${val}`} />
+                                                <Tooltip
+                                                    cursor={{ fill: '#F5F5F5' }}
+                                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.1)', fontWeight: 700 }}
+                                                />
+                                                <Bar dataKey="value" fill="#2E7D32" radius={[6, 6, 0, 0]} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Typography color="text.secondary" fontWeight={600}>Sem dados suficientes para este período.</Typography>
+                                        </Box>
+                                    )}
+                                </Box>
+                            </Card>
+                        </Grid>
+
+                        {/* Gráfico de Horários de Pico */}
+                        <Grid item xs={12} lg={4}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #E0E0E0', height: '100%' }}>
+                                <Typography variant="h6" sx={{ fontWeight: 900, mb: 3 }}>Horários de Pico</Typography>
+                                <Box sx={{ width: '100%', height: 300 }}>
+                                    {metrics?.peakHours && metrics.peakHours.length > 0 ? (
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={metrics.peakHours} layout="vertical" margin={{ left: 10 }}>
+                                                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#EEE" />
+                                                <XAxis type="number" hide />
+                                                <YAxis dataKey="hour" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fontWeight: 700, fill: '#666' }} />
+                                                <Tooltip
+                                                    cursor={{ fill: '#F5F5F5' }}
+                                                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 8px 24px rgba(0,0,0,0.1)', fontWeight: 700 }}
+                                                    formatter={(value) => [`${value} pedidos`, 'Volume']}
+                                                />
+                                                <Bar dataKey="count" fill="#FF8C00" radius={[0, 6, 6, 0]} barSize={20} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    ) : (
+                                        <Box sx={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                            <Typography color="text.secondary" fontWeight={600}>Aguardando novos pedidos...</Typography>
+                                        </Box>
+                                    )}
+                                </Box>
+                            </Card>
+                        </Grid>
+
+                        {/* RANKING: TOP 5 ITENS MAIS VENDIDOS */}
+                        <Grid item xs={12}>
+                            <Card elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid #E0E0E0' }}>
+                                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                                    <Typography variant="h6" sx={{ fontWeight: 900, color: '#1A1A1A' }}>Top 5 Produtos Mais Vendidos</Typography>
+                                    <Chip icon={<TrendingUp size={16} />} label="Maior Saída" sx={{ bgcolor: '#FFF3E0', color: '#E65100', fontWeight: 800 }} />
+                                </Box>
+
+                                {metrics?.topItems && metrics.topItems.length > 0 ? (
+                                    <List disablePadding>
+                                        {metrics.topItems.map((item, index) => {
+                                            // Pega a quantidade do 1º lugar para calcular o tamanho da barra
+                                            const maxQty = metrics.topItems[0].quantity || 1;
+                                            const progress = (item.quantity / maxQty) * 100;
+
+                                            return (
+                                                <ListItem key={index} sx={{ px: 0, py: 2, borderBottom: index !== metrics.topItems.length - 1 ? '1px solid #F0F0F0' : 'none', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                                                    <Box sx={{ display: 'flex', width: '100%', alignItems: 'center', mb: 1 }}>
+
+                                                        <ListItemAvatar sx={{ minWidth: 48 }}>
+                                                            <Avatar sx={{
+                                                                bgcolor: index === 0 ? '#FFD700' : index === 1 ? '#E0E0E0' : index === 2 ? '#CD7F32' : '#F5F5F5',
+                                                                color: index < 3 ? '#FFF' : '#757575',
+                                                                fontWeight: 900,
+                                                                boxShadow: index < 3 ? '0 4px 10px rgba(0,0,0,0.1)' : 'none'
+                                                            }}>
+                                                                {index + 1}
+                                                            </Avatar>
+                                                        </ListItemAvatar>
+
+                                                        <ListItemText
+                                                            primary={<Typography sx={{ fontWeight: 800, color: '#1A1A1A' }}>{item.name}</Typography>}
+                                                            secondary={<Typography variant="body2" sx={{ color: 'text.secondary', fontWeight: 600 }}>{item.quantity} pedidos</Typography>}
+                                                        />
+
+                                                        <Box sx={{ textAlign: 'right' }}>
+                                                            <Typography sx={{ fontWeight: 900, color: '#2E7D32' }}>
+                                                                R$ {item.revenue ? parseFloat(item.revenue).toFixed(2) : '0.00'}
+                                                            </Typography>
+                                                        </Box>
+                                                    </Box>
+
+                                                    {/* Barra de Progresso Visual */}
+                                                    <Box sx={{ width: '100%', pl: 6 }}>
+                                                        <LinearProgress
+                                                            variant="determinate"
+                                                            value={progress}
+                                                            sx={{
+                                                                height: 8,
+                                                                borderRadius: 4,
+                                                                bgcolor: '#F5F5F5',
+                                                                '& .MuiLinearProgress-bar': {
+                                                                    bgcolor: index === 0 ? '#FF8C00' : '#FFB74D',
+                                                                    borderRadius: 4
+                                                                }
+                                                            }}
+                                                        />
+                                                    </Box>
+                                                </ListItem>
+                                            );
+                                        })}
+                                    </List>
+                                ) : (
+                                    <Box sx={{ py: 6, textAlign: 'center', bgcolor: '#FAFAFA', borderRadius: '16px' }}>
+                                        <ShoppingBag size={48} color="#BDBDBD" style={{ marginBottom: '16px' }} />
+                                        <Typography color="text.secondary" fontWeight={700}>Aguardando dados de vendas para gerar o ranking.</Typography>
+                                    </Box>
+                                )}
+                            </Card>
+                        </Grid>
                     </Grid>
-                </Grid>
+                </Box>
             )}
 
             {tab === 1 && (

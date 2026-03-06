@@ -1055,7 +1055,6 @@ app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
         const client = await pool.connect();
         try {
             // 1. Financeiro: Receita e Pedidos
-            // Associando pagamento -> sessao para checar o id_restaurante
             const financialRes = await client.query(`
                 SELECT 
                     COALESCE(SUM(p.valor_total), 0) as revenue,
@@ -1075,7 +1074,6 @@ app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
             `, [restaurantId]);
 
             // 3. Performance: Tempo Médio
-            // Associando pedido -> sessao para checar o id_restaurante
             const performanceRes = await client.query(`
                 SELECT 
                     AVG(EXTRACT(EPOCH FROM (p.pronto_em - p.em_preparo_em))/60) as avg_production_time,
@@ -1128,6 +1126,25 @@ app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
                 ORDER BY DATE_TRUNC('day', p.criado_em)
             `, [restaurantId]);
 
+            // 🚀 7. NOVIDADE: Top 5 Itens Mais Vendidos
+            const topItemsRes = await client.query(`
+                SELECT 
+                    ci.nome as name, 
+                    CAST(SUM(pi.quantidade) AS INTEGER) as quantity, 
+                    SUM(pi.quantidade * pi.final_price) as revenue
+                FROM pedidos_itens pi
+                JOIN pedidos p ON pi.id_pedido = p.id_pedido
+                JOIN sessoes s ON p.id_sessao = s.id_sessao
+                JOIN cardapio_itens ci ON pi.id_item = ci.id_item
+                WHERE s.id_restaurante = $1 
+                  AND p.status != 'Cancelado'
+                  AND p.criado_em >= NOW() - ${interval}
+                GROUP BY ci.id_item, ci.nome
+                ORDER BY quantity DESC
+                LIMIT 5
+            `, [restaurantId]);
+
+            // Montando o JSON final que vai para o Front-end
             const metrics = {
                 revenue: parseFloat(financialRes.rows[0].revenue),
                 totalOrders: parseInt(financialRes.rows[0].total_orders),
@@ -1142,7 +1159,10 @@ app.get('/api/admin/metrics', authenticateToken, async (req, res) => {
                 },
                 peakHours: peakHoursRes.rows.map(r => ({ hour: `${parseInt(r.hour)}h`, count: parseInt(r.count) })),
                 abandonment: parseInt(abandonmentRes.rows[0].abandoned_sessions),
-                revenueEvolution: dailyRevenueRes.rows
+                revenueEvolution: dailyRevenueRes.rows,
+
+                // 🚀 Aqui incluímos o ranking no envio!
+                topItems: topItemsRes.rows
             };
 
             res.json(metrics);
